@@ -34,3 +34,11 @@ export type {
 } from "./ledger/types.js";
 
 export { assertJournalBalanced, assertFacilityUseComplete } from "./ledger/journal.js";
+
+export {
+  emptyLedgerState,
+  sortJournals,
+  applyJournal,
+  replay,
+} from "./ledger/replay.js";
+export type { LedgerState } from "./ledger/replay.js";

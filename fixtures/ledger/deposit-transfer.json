@@ -1,0 +1,41 @@
+{
+  "reportingCurrency": "CAD",
+  "accounts": [
+    { "id": "ext", "type": "EXTERNAL", "currency": "CAD" },
+    { "id": "cash", "type": "CASH", "currency": "CAD" },
+    { "id": "investment", "type": "INVESTMENT", "currency": "CAD" }
+  ],
+  "journals": [
+    {
+      "id": "j-deposit",
+      "type": "DEPOSIT",
+      "tradeDate": "2024-01-01",
+      "sortKey": 0,
+      "status": "POSTED",
+      "source": "MANUAL",
+      "postings": [
+        { "accountId": "ext", "amount": { "currency": "CAD", "minor": "-100000" } },
+        { "accountId": "cash", "amount": { "currency": "CAD", "minor": "100000" } }
+      ]
+    },
+    {
+      "id": "j-transfer",
+      "type": "TRANSFER",
+      "tradeDate": "2024-01-02",
+      "sortKey": 0,
+      "status": "POSTED",
+      "source": "MANUAL",
+      "postings": [
+        { "accountId": "cash", "amount": { "currency": "CAD", "minor": "-40000" } },
+        { "accountId": "investment", "amount": { "currency": "CAD", "minor": "40000" } }
+      ]
+    }
+  ],
+  "expected": {
+    "ledgerVersion": 2,
+    "balances": {
+      "cash": { "currency": "CAD", "minor": "60000" },
+      "investment": { "currency": "CAD", "minor": "40000" }
+    }
+  }
+}
