@@ -1,6 +1,10 @@
 import { add, money, type Money } from "../money/money.js";
 import type { Quantity } from "../money/quantity.js";
-import { assertFacilityUseComplete, assertJournalBalanced } from "./journal.js";
+import {
+  assertFacilityUseComplete,
+  assertJournalBalanced,
+  assertKnownAccounts,
+} from "./journal.js";
 import { applyPostingQuantities } from "./positions-qty.js";
 import type { Account, AccountId, Journal } from "./types.js";
 
@@ -38,6 +42,7 @@ export function applyJournal(
   accounts: ReadonlyMap<AccountId, Account>,
 ): LedgerState {
   assertJournalBalanced(journal);
+  assertKnownAccounts(journal, accounts);
   assertFacilityUseComplete(journal, accounts);
 
   const balances = new Map(state.balances);

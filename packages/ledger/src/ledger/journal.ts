@@ -35,6 +35,21 @@ export function assertJournalBalanced(journal: Journal): void {
   }
 }
 
+export function assertKnownAccounts(
+  journal: Journal,
+  accounts: ReadonlyMap<AccountId, Account>,
+): void {
+  for (const posting of journal.postings) {
+    if (!accounts.has(posting.accountId)) {
+      throw new ValidationError(
+        `Unknown account: ${posting.accountId}`,
+        "UNKNOWN_ACCOUNT",
+        [journal.id],
+      );
+    }
+  }
+}
+
 export function assertFacilityUseComplete(
   journal: Journal,
   accounts: ReadonlyMap<AccountId, Account>,

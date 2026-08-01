@@ -8,6 +8,7 @@ import {
   applyJournal,
   replay,
 } from "../src/ledger/replay.js";
+import { ValidationError } from "../src/ledger/errors.js";
 
 type FixtureMoney = { currency: string; minor: string };
 type Fixture = {
@@ -107,5 +108,19 @@ describe("applyJournal", () => {
     expect(state.balances.get("cash")).toEqual(money(CAD, 100000n));
     expect(state.balances.get("ext")).toEqual(money(CAD, -100000n));
     expect(state.ledgerVersion).toBe(1);
+  });
+
+  it("throws UNKNOWN_ACCOUNT when a posting references a missing account", () => {
+    const { journals } = loadFixture();
+    const emptyAccounts = new Map<string, Account>();
+    const state = emptyLedgerState("CAD");
+
+    expect(() => applyJournal(state, journals[0]!, emptyAccounts)).toThrow(ValidationError);
+    try {
+      applyJournal(state, journals[0]!, emptyAccounts);
+    } catch (err) {
+      expect(err).toBeInstanceOf(ValidationError);
+      expect((err as ValidationError).code).toBe("UNKNOWN_ACCOUNT");
+    }
   });
 });

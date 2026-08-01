@@ -2,17 +2,11 @@ import { eq } from "drizzle-orm";
 import {
   account,
   createJournalRepo,
-  currency,
   household,
   type Db,
 } from "@stonks/db";
-import { money, replay, type Account, type Journal } from "@stonks/ledger";
+import { replay, type Account } from "@stonks/ledger";
 import { getDb } from "@/lib/db";
-
-const DEMO_HOUSEHOLD_ID = "00000000-0000-4000-8000-000000000001";
-const DEMO_EXT_ACCOUNT_ID = "demo-ext";
-const DEMO_CASH_ACCOUNT_ID = "demo-cash";
-const DEMO_JOURNAL_ID = "demo-deposit";
 
 type BalanceEntry = {
   accountId: string;
@@ -26,7 +20,6 @@ type BalancesResponse = {
   ledgerVersion?: number;
   balances: BalanceEntry[];
   message?: string;
-  seeded?: boolean;
 };
 
 export async function GET(): Promise<Response> {
@@ -45,22 +38,10 @@ export async function GET(): Promise<Response> {
 }
 
 async function getBalances(db: Db): Promise<BalancesResponse> {
-  let householdRow = await db.select().from(household).limit(1).then((rows) => rows[0]);
-  let seeded = false;
+  const householdRow = await db.select().from(household).limit(1).then((rows) => rows[0]);
 
   if (!householdRow) {
-    await seedDemoHousehold(db);
-    seeded = true;
-    householdRow = await db
-      .select()
-      .from(household)
-      .where(eq(household.id, DEMO_HOUSEHOLD_ID))
-      .limit(1)
-      .then((rows) => rows[0]);
-  }
-
-  if (!householdRow) {
-    return { balances: [], message: "no household" };
+    return { balances: [], ledgerVersion: 0, message: "no household" };
   }
 
   const householdId = householdRow.id;
@@ -72,7 +53,7 @@ async function getBalances(db: Db): Promise<BalancesResponse> {
     .where(eq(account.householdId, householdId));
 
   if (accountRows.length === 0) {
-    return { householdId, reportingCurrency, balances: [], message: "no accounts" };
+    return { householdId, reportingCurrency, balances: [], ledgerVersion: 0, message: "no accounts" };
   }
 
   const accountsMap = new Map<string, Account>(
@@ -97,61 +78,10 @@ async function getBalances(db: Db): Promise<BalancesResponse> {
 
   balances.sort((a, b) => a.accountId.localeCompare(b.accountId));
 
-  const response: BalancesResponse = {
+  return {
     householdId,
     reportingCurrency,
     ledgerVersion: state.ledgerVersion,
     balances,
   };
-
-  if (seeded) {
-    response.seeded = true;
-  }
-
-  return response;
-}
-
-async function seedDemoHousehold(db: Db): Promise<void> {
-  await db
-    .insert(currency)
-    .values({ code: "CAD", minorUnits: 2, name: "Canadian Dollar" })
-    .onConflictDoNothing();
-
-  await db.insert(household).values({
-    id: DEMO_HOUSEHOLD_ID,
-    reportingCurrency: "CAD",
-  });
-
-  await db.insert(account).values([
-    {
-      id: DEMO_EXT_ACCOUNT_ID,
-      householdId: DEMO_HOUSEHOLD_ID,
-      type: "EXTERNAL",
-      currency: "CAD",
-      name: "External",
-    },
-    {
-      id: DEMO_CASH_ACCOUNT_ID,
-      householdId: DEMO_HOUSEHOLD_ID,
-      type: "CASH",
-      currency: "CAD",
-      name: "Cash",
-    },
-  ]);
-
-  const depositJournal: Journal = {
-    id: DEMO_JOURNAL_ID,
-    type: "DEPOSIT",
-    tradeDate: "2024-01-01",
-    sortKey: 0,
-    status: "POSTED",
-    source: "MANUAL",
-    postings: [
-      { accountId: DEMO_EXT_ACCOUNT_ID, amount: money("CAD", -100_000n) },
-      { accountId: DEMO_CASH_ACCOUNT_ID, amount: money("CAD", 100_000n) },
-    ],
-  };
-
-  const repo = createJournalRepo(db);
-  await repo.insertPosted(depositJournal, DEMO_HOUSEHOLD_ID);
 }

@@ -3,7 +3,6 @@ import type { Journal, Posting } from "@stonks/ledger";
 import { money, qtyFromDecimalString, qtyToDecimalString } from "@stonks/ledger";
 import type { Db } from "../client.js";
 import {
-  account,
   household,
   journal,
   journalFacilityUse,
@@ -87,12 +86,8 @@ export function createJournalRepo(db: Db): JournalRepo {
       const journalIds = journalRows.map((row) => row.id);
 
       const postingRows = await db
-        .select({
-          posting,
-          accountCurrency: account.currency,
-        })
+        .select()
         .from(posting)
-        .innerJoin(account, eq(posting.accountId, account.id))
         .where(inArray(posting.journalId, journalIds));
 
       const facilityRows = await db
@@ -100,11 +95,11 @@ export function createJournalRepo(db: Db): JournalRepo {
         .from(journalFacilityUse)
         .where(inArray(journalFacilityUse.journalId, journalIds));
 
-      const postingsByJournal = new Map<string, Array<{ posting: typeof posting.$inferSelect; accountCurrency: string }>>();
+      const postingsByJournal = new Map<string, Array<typeof posting.$inferSelect>>();
       for (const row of postingRows) {
-        const list = postingsByJournal.get(row.posting.journalId) ?? [];
+        const list = postingsByJournal.get(row.journalId) ?? [];
         list.push(row);
-        postingsByJournal.set(row.posting.journalId, list);
+        postingsByJournal.set(row.journalId, list);
       }
 
       const facilityByJournal = new Map<string, Array<typeof journalFacilityUse.$inferSelect>>();
@@ -128,14 +123,14 @@ export function createJournalRepo(db: Db): JournalRepo {
 
 function toDomainJournal(
   row: typeof journal.$inferSelect,
-  postingRows: Array<{ posting: typeof posting.$inferSelect; accountCurrency: string }>,
+  postingRows: Array<typeof posting.$inferSelect>,
   facilityRows: Array<typeof journalFacilityUse.$inferSelect>,
   reportingCurrency: string,
 ): Journal {
-  const domainPostings: Posting[] = postingRows.map(({ posting: p, accountCurrency }) => {
+  const domainPostings: Posting[] = postingRows.map((p) => {
     const domainPosting: Posting = {
       accountId: p.accountId,
-      amount: money(accountCurrency, p.amountMinor),
+      amount: money(reportingCurrency, p.amountMinor),
     };
 
     if (p.quantity !== null) {
