@@ -46,6 +46,10 @@ export type FacilityUseLine = {
   amount: Money;
 };
 
+export type CorporateAction =
+  | { kind: "SPLIT"; ratioN: bigint; ratioD: bigint }
+  | { kind: "RETURN_OF_CAPITAL"; reportingMinor: bigint; tradeMinor: bigint };
+
 export type Journal = {
   id: JournalId;
   type: JournalType;
@@ -58,6 +62,7 @@ export type Journal = {
   supersedesJournalId?: JournalId;
   postings: Posting[];
   facilityUses?: FacilityUseLine[];
+  corporateAction?: CorporateAction;
 };
 
 export type Account = {

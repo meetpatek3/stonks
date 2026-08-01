@@ -1,0 +1,79 @@
+{
+  "candidates": [
+    {
+      "id": "ic-new-deposit",
+      "externalNaturalKey": "broker:deposit:2024-01-15:50000",
+      "tradeDate": "2024-01-15",
+      "proposedJournal": {
+        "id": "j-import-deposit",
+        "type": "DEPOSIT",
+        "tradeDate": "2024-01-15",
+        "sortKey": 0,
+        "status": "POSTED",
+        "source": "IMPORT",
+        "externalNaturalKey": "broker:deposit:2024-01-15:50000",
+        "postings": [
+          { "accountId": "ext", "amount": { "currency": "CAD", "minor": "-50000" } },
+          { "accountId": "cash", "amount": { "currency": "CAD", "minor": "50000" } }
+        ]
+      }
+    },
+    {
+      "id": "ic-dup-deposit",
+      "externalNaturalKey": "broker:deposit:2024-01-01:100000",
+      "tradeDate": "2024-01-01",
+      "proposedJournal": {
+        "id": "j-import-dup",
+        "type": "DEPOSIT",
+        "tradeDate": "2024-01-01",
+        "sortKey": 0,
+        "status": "POSTED",
+        "source": "IMPORT",
+        "externalNaturalKey": "broker:deposit:2024-01-01:100000",
+        "postings": [
+          { "accountId": "ext", "amount": { "currency": "CAD", "minor": "-100000" } },
+          { "accountId": "cash", "amount": { "currency": "CAD", "minor": "100000" } }
+        ]
+      }
+    },
+    {
+      "id": "ic-conflict-deposit",
+      "externalNaturalKey": "broker:deposit:2024-01-01:100000",
+      "tradeDate": "2024-01-01",
+      "proposedJournal": {
+        "id": "j-import-conflict",
+        "type": "DEPOSIT",
+        "tradeDate": "2024-01-01",
+        "sortKey": 0,
+        "status": "POSTED",
+        "source": "IMPORT",
+        "externalNaturalKey": "broker:deposit:2024-01-01:100000",
+        "postings": [
+          { "accountId": "ext", "amount": { "currency": "CAD", "minor": "-99999" } },
+          { "accountId": "cash", "amount": { "currency": "CAD", "minor": "99999" } }
+        ]
+      }
+    }
+  ],
+  "existingJournals": [
+    {
+      "id": "j-deposit",
+      "type": "DEPOSIT",
+      "tradeDate": "2024-01-01",
+      "sortKey": 0,
+      "status": "POSTED",
+      "source": "MANUAL",
+      "externalNaturalKey": "broker:deposit:2024-01-01:100000",
+      "postings": [
+        { "accountId": "ext", "amount": { "currency": "CAD", "minor": "-100000" } },
+        { "accountId": "cash", "amount": { "currency": "CAD", "minor": "100000" } }
+      ]
+    }
+  ],
+  "expected": {
+    "newCandidateId": "ic-new-deposit",
+    "duplicateCandidateId": "ic-dup-deposit",
+    "conflictCandidateId": "ic-conflict-deposit",
+    "matchedJournalId": "j-deposit"
+  }
+}

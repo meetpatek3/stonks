@@ -31,6 +31,7 @@ export type {
   JournalId,
   Posting,
   FacilityUseLine,
+  CorporateAction,
   Journal,
   Account,
 } from "./ledger/types.js";
@@ -52,6 +53,9 @@ export type {
   SecurityLeg,
   PositionState,
 } from "./ledger/positions.js";
+
+export type { CostState, CostBasisState } from "./ledger/cost-basis-state.js";
+export { isUnknownCost } from "./ledger/cost-basis-state.js";
 
 export {
   emptyLedgerState,
@@ -80,6 +84,17 @@ export { rateBpsOnDate, modelInterest } from "./interest/accrue.js";
 
 export { actualInterestCharged, interestVariance } from "./interest/variance.js";
 
+export {
+  attributeInvestmentInterest,
+} from "./interest/dollar-days.js";
+export type {
+  PositionDollarDays,
+  InvestmentInterestAllocation,
+} from "./interest/dollar-days.js";
+
+export { decomposeFxGain } from "./fx/gain-decomposition.js";
+export type { FxDecomposition } from "./fx/gain-decomposition.js";
+
 export type {
   DayCount,
   PostingDayRule,
@@ -91,3 +106,30 @@ export type {
   InterestVariance,
 } from "./interest/types.js";
 export { FACILITY_USES } from "./interest/types.js";
+
+export type {
+  TaxFlagCode,
+  TaxFlag,
+  TaxYearSummary,
+  CanadaTaxYearArgs,
+  JurisdictionModule,
+} from "./tax/types.js";
+export { summarizeCanadaTaxYear, CanadaJurisdiction } from "./tax/canada.js";
+
+export type {
+  Statement,
+  ImportCandidate,
+  MatchState,
+  MatchedImportCandidate,
+  ReconciliationResult,
+} from "./import/types.js";
+export { matchImportCandidates } from "./import/match.js";
+export { reconcileStatement } from "./import/reconcile.js";
+
+export type {
+  PriceQuote,
+  PriceOverride,
+  MarketDataProvider,
+} from "./market/types.js";
+export { resolvePrice } from "./market/types.js";
+export { FixtureMarketDataProvider } from "./market/fixture-provider.js";
