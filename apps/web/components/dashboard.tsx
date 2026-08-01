@@ -120,7 +120,7 @@ export function Dashboard({ snapshot }: DashboardProps) {
                 </Card.Header>
                 <Card.Content className="p-5 pt-2">
                   <p className="text-2xl font-semibold tabular-nums tracking-tight">
-                    {formatMoney(row.minor, row.currency)}
+                    {formatMoney(row.minor, row.currency, row.minorUnits)}
                   </p>
                 </Card.Content>
               </Card>

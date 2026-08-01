@@ -1,6 +1,7 @@
 import {
   account,
   createJournalRepo,
+  currency,
   eq,
   household,
   type Db,
@@ -11,19 +12,33 @@ import type { BalanceRow, PortfolioSnapshot } from "@/lib/portfolio-shared";
 export type { BalanceRow, PortfolioSnapshot } from "@/lib/portfolio-shared";
 export { formatMoney } from "@/lib/portfolio-shared";
 
-export async function getPortfolioSnapshot(db: Db): Promise<PortfolioSnapshot> {
-  const householdRow = await db.select().from(household).limit(1).then((rows) => rows[0]);
+export async function getPortfolioSnapshot(
+  db: Db,
+  householdId: string,
+): Promise<PortfolioSnapshot> {
+  const householdRow = await db
+    .select()
+    .from(household)
+    .where(eq(household.id, householdId))
+    .limit(1)
+    .then((rows) => rows[0]);
 
   if (!householdRow) {
-    return { balances: [], ledgerVersion: 0, message: "no household" };
+    return { balances: [], ledgerVersion: 0, message: "household not found" };
   }
 
-  const householdId = householdRow.id;
   const reportingCurrency = householdRow.reportingCurrency;
 
   const accountRows = await db
-    .select()
+    .select({
+      id: account.id,
+      name: account.name,
+      type: account.type,
+      currency: account.currency,
+      minorUnits: currency.minorUnits,
+    })
     .from(account)
+    .innerJoin(currency, eq(account.currency, currency.code))
     .where(eq(account.householdId, householdId));
 
   if (accountRows.length === 0) {
@@ -57,6 +72,7 @@ export async function getPortfolioSnapshot(db: Db): Promise<PortfolioSnapshot> {
       accountType: meta?.type ?? "UNKNOWN",
       currency: balance.currency,
       minor: balance.minor.toString(),
+      minorUnits: meta?.minorUnits ?? 2,
     });
   }
 

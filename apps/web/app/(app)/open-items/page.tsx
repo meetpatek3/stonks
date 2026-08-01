@@ -1,4 +1,4 @@
-import { demoPortfolio } from "../../lib/demo-portfolio";
+import { demoPortfolio } from "@/lib/demo-portfolio";
 
 const tone: Record<string, string> = {
   info: "text-[var(--color-fog)]",

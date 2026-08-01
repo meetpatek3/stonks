@@ -41,7 +41,6 @@ export async function POST(request: Request): Promise<Response> {
     return response;
   } catch (error) {
     console.error("login error:", error);
-    const message = error instanceof Error ? error.message : "Login failed";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: "Login failed" }, { status: 500 });
   }
 }

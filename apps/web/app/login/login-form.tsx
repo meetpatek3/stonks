@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button, Card, FieldError, Input, Label, TextField } from "@heroui/react";
 import { Icon } from "@iconify/react";
+import { safeRedirectPath } from "@/lib/safe-redirect";
 
 export function LoginForm() {
   const router = useRouter();
@@ -31,7 +32,7 @@ export function LoginForm() {
         return;
       }
 
-      const next = searchParams.get("next") || "/";
+      const next = safeRedirectPath(searchParams.get("next"));
       router.replace(next);
       router.refresh();
     } catch {

@@ -1,4 +1,4 @@
-import { demoPortfolio } from "../../lib/demo-portfolio";
+import { demoPortfolio } from "@/lib/demo-portfolio";
 
 export default function ChartsPage() {
   const { allocation, valueOverTime } = demoPortfolio.chartSeries;
