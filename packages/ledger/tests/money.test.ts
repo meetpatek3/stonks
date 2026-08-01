@@ -27,7 +27,6 @@ describe("Money", () => {
   });
 
   it("does not accept number minors at the type level (runtime guard)", () => {
-    // @ts-expect-error minor must be bigint
-    expect(() => money(CAD, 10.5 as unknown as bigint)).toThrow();
+    expect(() => money(CAD, 10.5 as unknown as bigint)).toThrow(TypeError);
   });
 });

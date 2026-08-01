@@ -1,4 +1,9 @@
-import type { CurrencyCode, CurrencyDef } from "./currency.js";
+import { CAD, USD, type CurrencyCode, type CurrencyDef } from "./currency.js";
+
+const KNOWN_MINOR_UNITS: Record<string, number> = {
+  [CAD.code]: CAD.minorUnits,
+  [USD.code]: USD.minorUnits,
+};
 
 export type Money = {
   readonly currency: CurrencyCode;
@@ -36,6 +41,20 @@ export function compare(a: Money, b: Money): -1 | 0 | 1 {
   if (a.minor < b.minor) return -1;
   if (a.minor > b.minor) return 1;
   return 0;
+}
+
+export function formatMinor(a: Money): string {
+  const minorUnits = KNOWN_MINOR_UNITS[a.currency];
+  if (minorUnits === undefined) {
+    return `${a.currency} ${a.minor.toString()}`;
+  }
+  const sign = a.minor < 0n ? "-" : "";
+  const absMinor = a.minor < 0n ? -a.minor : a.minor;
+  const divisor = 10n ** BigInt(minorUnits);
+  const whole = absMinor / divisor;
+  const frac = absMinor % divisor;
+  const fracStr = frac.toString().padStart(minorUnits, "0");
+  return `${a.currency} ${sign}${whole}.${fracStr}`;
 }
 
 function assertSameCurrency(a: Money, b: Money): void {
