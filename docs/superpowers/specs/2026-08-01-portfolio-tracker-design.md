@@ -2,6 +2,7 @@
 
 **Date:** 2026-08-01  
 **Status:** Draft for review  
+**Repository:** https://github.com/meetpatek3/stonks  
 **Product question:** For each position, what did I actually make after commissions, currency, and the interest on money borrowed to hold it?
 
 ---
