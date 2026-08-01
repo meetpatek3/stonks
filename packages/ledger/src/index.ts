@@ -16,6 +16,8 @@ export {
 } from "./money/quantity.js";
 export type { Quantity } from "./money/quantity.js";
 
+export { mulDivFloor, allocateCost, allocateExact } from "./money/rationals.js";
+
 export { ValidationError } from "./ledger/errors.js";
 
 export type {
@@ -35,15 +37,29 @@ export type {
 
 export { assertJournalBalanced, assertFacilityUseComplete } from "./ledger/journal.js";
 
+export { positionKey } from "./ledger/positions-qty.js";
+
+export {
+  emptyPositionState,
+  extractSecurityLegs,
+  applyPositionsForJournal,
+} from "./ledger/positions.js";
+export type {
+  CostBasisMethod,
+  FifoLot,
+  Position,
+  RealizedGain,
+  SecurityLeg,
+  PositionState,
+} from "./ledger/positions.js";
+
 export {
   emptyLedgerState,
   sortJournals,
   applyJournal,
   replay,
 } from "./ledger/replay.js";
-export type { LedgerState } from "./ledger/replay.js";
-
-export { mulDivFloor, allocateExact } from "./money/rationals.js";
+export type { LedgerState, ReplayOptions } from "./ledger/replay.js";
 
 export {
   dayCountDenominator,

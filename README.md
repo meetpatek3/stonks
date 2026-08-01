@@ -43,6 +43,7 @@ Open [http://localhost:3000](http://localhost:3000). API smoke checks:
 |----------|-------------|
 | [Design spec](docs/superpowers/specs/2026-08-01-portfolio-tracker-design.md) | Product goals, architecture, and domain rules |
 | [Ledger foundation plan](docs/superpowers/plans/2026-08-01-ledger-foundation.md) | Phase 1 implementation plan and task breakdown |
+| [Positions + cost basis plan](docs/superpowers/plans/2026-08-01-positions-cost-basis.md) | Phase 2 ACB/FIFO dual-currency positions |
 | [Interest engine plan](docs/superpowers/plans/2026-08-01-interest-engine.md) | Phase 3 use-slice interest model + variance |
 
 ## Phase 1 definition of done
@@ -55,6 +56,17 @@ Track progress in the [ledger foundation plan](docs/superpowers/plans/2026-08-01
 - [x] Docker Postgres migrates; journal repo round-trip works
 - [x] Next health + balances API responds
 - [x] No `number` used for money in `packages/ledger` or money columns in DB
+
+## Phase 2 definition of done
+
+Track progress in the [positions + cost basis plan](docs/superpowers/plans/2026-08-01-positions-cost-basis.md#phase-2-definition-of-done):
+
+- [x] ACB worked fixture matches hand calculation
+- [x] FIFO worked fixture matches hand calculation
+- [x] Dual-currency ACB fixture matches hand calculation
+- [x] Replay exposes `positions` + `realized`
+- [x] Property tests green
+- [x] No `number` for money/qty/cost paths in new ledger code
 
 ## Phase 3 definition of done
 

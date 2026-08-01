@@ -1,0 +1,23 @@
+{
+  "method": "ACB",
+  "reportingCurrency": "CAD",
+  "tradeCurrency": "USD",
+  "narrative": "USD-traded shares with CAD reporting; ACB in both currencies",
+  "expectedAfter": {
+    "positionKey": "investment:AAPL",
+    "quantity": "10.00000000",
+    "acbCostTradeMinor": "10500",
+    "acbCostReportingMinor": "14150",
+    "realized": [
+      {
+        "journalId": "j-sell",
+        "costTradeMinor": "10500",
+        "costReportingMinor": "14150",
+        "proceedsTradeMinor": "12000",
+        "proceedsReportingMinor": "16000",
+        "gainTradeMinor": "1500",
+        "gainReportingMinor": "1850"
+      }
+    ]
+  }
+}

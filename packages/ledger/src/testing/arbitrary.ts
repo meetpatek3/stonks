@@ -182,6 +182,103 @@ export const conflictingSameDayTradesArb: fc.Arbitrary<ConflictingSameDayTrades>
       };
     });
 
+export type BuySellChain = {
+  journals: Journal[];
+  accounts: Map<string, Account>;
+  totalBuyQtyScaled: bigint;
+  totalSellQtyScaled: bigint;
+  totalBuyCostReporting: bigint;
+};
+
+/** Buys then sells that never oversell — safe for both ACB and FIFO. */
+export const buySellChainArb: fc.Arbitrary<BuySellChain> = fc
+  .record({
+    buys: fc.array(
+      fc.record({
+        id: journalIdArb,
+        tradeDate: tradeDateArb,
+        qtyWhole: fc.integer({ min: 1, max: 50 }),
+        unitPriceMinor: fc.bigInt({ min: 1n, max: 500_00n }),
+      }),
+      { minLength: 1, maxLength: 6 },
+    ),
+    sellFractions: fc.array(fc.integer({ min: 1, max: 100 }), {
+      minLength: 0,
+      maxLength: 4,
+    }),
+  })
+  .map(({ buys, sellFractions }) => {
+    const buyJournals: Journal[] = [];
+    let totalBuyQtyScaled = 0n;
+    let totalBuyCostReporting = 0n;
+    let day = 0;
+
+    for (const buy of buys) {
+      const qtyScaled = qtyFromDecimalString(String(buy.qtyWhole)).scaled;
+      const cost = buy.unitPriceMinor * BigInt(buy.qtyWhole);
+      totalBuyQtyScaled += qtyScaled;
+      totalBuyCostReporting += cost;
+      buyJournals.push({
+        id: buy.id,
+        type: "BUY",
+        tradeDate: `2024-01-${String((day % 28) + 1).padStart(2, "0")}`,
+        sortKey: day,
+        status: "POSTED",
+        source: "MANUAL",
+        postings: [
+          {
+            accountId: "investment",
+            amount: money(CAD, cost),
+            quantity: { scaled: qtyScaled },
+            securityId: SECURITY,
+          },
+          { accountId: "cash", amount: money(CAD, -cost) },
+        ],
+      });
+      day += 1;
+    }
+
+    const sellJournals: Journal[] = [];
+    let remaining = totalBuyQtyScaled;
+    let totalSellQtyScaled = 0n;
+
+    for (let i = 0; i < sellFractions.length && remaining > 0n; i += 1) {
+      const fraction = sellFractions[i]!;
+      let sellScaled = (remaining * BigInt(fraction)) / 100n;
+      if (sellScaled === 0n) sellScaled = remaining < 1_00000000n ? remaining : 1_00000000n;
+      if (sellScaled > remaining) sellScaled = remaining;
+
+      const proceeds = (sellScaled / 1_00000000n) * 100_00n + 1n;
+      sellJournals.push({
+        id: `sell-${i}-${buys[0]!.id}`,
+        type: "SELL",
+        tradeDate: `2024-06-${String((i % 28) + 1).padStart(2, "0")}`,
+        sortKey: i,
+        status: "POSTED",
+        source: "MANUAL",
+        postings: [
+          {
+            accountId: "investment",
+            amount: money(CAD, -proceeds),
+            quantity: { scaled: -sellScaled },
+            securityId: SECURITY,
+          },
+          { accountId: "cash", amount: money(CAD, proceeds) },
+        ],
+      });
+      remaining -= sellScaled;
+      totalSellQtyScaled += sellScaled;
+    }
+
+    return {
+      journals: [...buyJournals, ...sellJournals],
+      accounts: defaultAccountsMap(),
+      totalBuyQtyScaled,
+      totalSellQtyScaled,
+      totalBuyCostReporting,
+    };
+  });
+
 export function facilityAccountsMap(): Map<string, Account> {
   return new Map([
     ["facility", { id: "facility", type: "CREDIT_FACILITY", currency: "CAD" }],
