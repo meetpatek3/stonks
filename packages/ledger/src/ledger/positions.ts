@@ -1,10 +1,13 @@
-import { allocateCost } from "../money/rationals.js";
+import { allocateCost, mulDivFloor } from "../money/rationals.js";
 import { qtyAdd, qtyIsZero, type Quantity } from "../money/quantity.js";
+import type { CostState } from "./cost-basis-state.js";
 import { ValidationError } from "./errors.js";
 import { positionKey } from "./positions-qty.js";
 import type {
   AccountId,
+  CorporateAction,
   JournalId,
+  JournalType,
   Posting,
   SecurityId,
 } from "./types.js";
@@ -24,6 +27,7 @@ export type Position = {
   readonly quantity: Quantity;
   readonly tradeCurrency: string;
   readonly method: CostBasisMethod;
+  readonly costState: CostState;
   readonly acbCostTradeMinor: bigint;
   readonly acbCostReportingMinor: bigint;
   readonly lots: readonly FifoLot[];
@@ -41,6 +45,7 @@ export type RealizedGain = {
   readonly costReportingMinor: bigint;
   readonly gainTradeMinor: bigint;
   readonly gainReportingMinor: bigint;
+  readonly costState: CostState;
   readonly sourceJournalIds: string[];
 };
 
@@ -99,13 +104,37 @@ export function extractSecurityLegs(postings: readonly Posting[]): SecurityLeg[]
   return legs;
 }
 
+function isUnknownOpeningCost(
+  journalType: JournalType | undefined,
+  leg: SecurityLeg,
+): boolean {
+  if (journalType !== "OPENING") {
+    return false;
+  }
+  return leg.tradeAmountMinor === 0n && leg.reportingAmountMinor === 0n;
+}
+
 export function applyPositionsForJournal(
   state: PositionState,
-  journal: { id: string; postings: Posting[] },
+  journal: {
+    id: string;
+    type?: JournalType;
+    postings: Posting[];
+    corporateAction?: CorporateAction;
+  },
   method: CostBasisMethod,
 ): PositionState {
   let positions = state.positions;
   let realized = state.realized;
+
+  if (journal.type === "CORPORATE_ACTION" && journal.corporateAction !== undefined) {
+    positions = applyCorporateAction(
+      positions,
+      journal.id,
+      journal.corporateAction,
+      extractSecurityLegs(journal.postings),
+    );
+  }
 
   for (const leg of extractSecurityLegs(journal.postings)) {
     if (qtyIsZero(leg.quantity)) {
@@ -113,7 +142,14 @@ export function applyPositionsForJournal(
     }
 
     if (leg.quantity.scaled > 0n) {
-      const next = applyAcquire(positions, journal.id, leg, method);
+      const unknownCost = isUnknownOpeningCost(journal.type, leg);
+      const next = applyAcquire(
+        positions,
+        journal.id,
+        leg,
+        method,
+        unknownCost,
+      );
       positions = next;
     } else {
       const result = applyDispose(positions, realized, journal.id, leg, method);
@@ -125,23 +161,132 @@ export function applyPositionsForJournal(
   return { positions, realized };
 }
 
+function applyCorporateAction(
+  positions: ReadonlyMap<string, Position>,
+  journalId: JournalId,
+  action: CorporateAction,
+  legs: readonly SecurityLeg[],
+): Map<string, Position> {
+  if (legs.length === 0) {
+    throw new ValidationError(
+      "Corporate action requires at least one security leg",
+      "MISSING_COST",
+      [journalId],
+    );
+  }
+
+  const next = new Map(positions);
+
+  for (const leg of legs) {
+    const key = positionKey(leg.accountId, leg.securityId);
+    const existing = next.get(key);
+    if (existing === undefined) {
+      throw new ValidationError(
+        `No position for corporate action on ${key}`,
+        "NEGATIVE_QUANTITY",
+        [journalId],
+      );
+    }
+
+    switch (action.kind) {
+      case "SPLIT": {
+        if (action.ratioN <= 0n || action.ratioD <= 0n) {
+          throw new ValidationError(
+            "Split ratio must be positive",
+            "COST_CURRENCY",
+            [journalId],
+          );
+        }
+        const newQtyScaled = mulDivFloor(
+          existing.quantity.scaled,
+          action.ratioN,
+          action.ratioD,
+        );
+        if (newQtyScaled === 0n) {
+          next.delete(key);
+        } else {
+          const newLots =
+            existing.method === "FIFO"
+              ? existing.lots.map((lot) => ({
+                  ...lot,
+                  quantity: {
+                    scaled: mulDivFloor(
+                      lot.quantity.scaled,
+                      action.ratioN,
+                      action.ratioD,
+                    ),
+                  },
+                }))
+              : [];
+          next.set(key, {
+            ...existing,
+            quantity: { scaled: newQtyScaled },
+            lots: newLots,
+          });
+        }
+        break;
+      }
+      case "RETURN_OF_CAPITAL": {
+        const newTrade = max0(existing.acbCostTradeMinor - action.tradeMinor);
+        const newReporting = max0(
+          existing.acbCostReportingMinor - action.reportingMinor,
+        );
+        let newLots = existing.lots;
+        if (existing.method === "FIFO" && existing.lots.length > 0) {
+          newLots = existing.lots.map((lot) => ({
+            ...lot,
+            costTradeMinor: max0(lot.costTradeMinor - action.tradeMinor),
+            costReportingMinor: max0(
+              lot.costReportingMinor - action.reportingMinor,
+            ),
+          }));
+        }
+        next.set(key, {
+          ...existing,
+          acbCostTradeMinor: newTrade,
+          acbCostReportingMinor: newReporting,
+          lots: newLots,
+        });
+        break;
+      }
+      default: {
+        const _exhaustive: never = action;
+        throw new Error(`Unknown corporate action: ${_exhaustive}`);
+      }
+    }
+  }
+
+  return next;
+}
+
+function max0(value: bigint): bigint {
+  return value < 0n ? 0n : value;
+}
+
 function applyAcquire(
   positions: ReadonlyMap<string, Position>,
   journalId: JournalId,
   leg: SecurityLeg,
   method: CostBasisMethod,
+  unknownCost: boolean,
 ): Map<string, Position> {
-  if (leg.tradeAmountMinor < 0n || leg.reportingAmountMinor < 0n) {
-    throw new ValidationError(
-      "Acquire security leg requires non-negative trade and reporting amounts",
-      "COST_CURRENCY",
-      [journalId],
-    );
+  if (!unknownCost) {
+    if (leg.tradeAmountMinor < 0n || leg.reportingAmountMinor < 0n) {
+      throw new ValidationError(
+        "Acquire security leg requires non-negative trade and reporting amounts",
+        "COST_CURRENCY",
+        [journalId],
+      );
+    }
   }
 
   const key = positionKey(leg.accountId, leg.securityId);
   const existing = positions.get(key);
   const next = new Map(positions);
+
+  const legCostTrade = unknownCost ? 0n : leg.tradeAmountMinor;
+  const legCostReporting = unknownCost ? 0n : leg.reportingAmountMinor;
+  const legCostState: CostState = unknownCost ? "Unknown" : "Known";
 
   if (existing !== undefined) {
     if (existing.tradeCurrency !== leg.tradeCurrency) {
@@ -160,14 +305,19 @@ function applyAcquire(
     }
 
     const quantity = qtyAdd(existing.quantity, leg.quantity);
-    const acbCostTradeMinor = existing.acbCostTradeMinor + leg.tradeAmountMinor;
+    const acbCostTradeMinor = existing.acbCostTradeMinor + legCostTrade;
     const acbCostReportingMinor =
-      existing.acbCostReportingMinor + leg.reportingAmountMinor;
+      existing.acbCostReportingMinor + legCostReporting;
+    const costState: CostState =
+      existing.costState === "Unknown" || legCostState === "Unknown"
+        ? "Unknown"
+        : "Known";
 
     if (method === "ACB") {
       next.set(key, {
         ...existing,
         quantity,
+        costState,
         acbCostTradeMinor,
         acbCostReportingMinor,
         lots: [],
@@ -176,6 +326,7 @@ function applyAcquire(
       next.set(key, {
         ...existing,
         quantity,
+        costState,
         acbCostTradeMinor,
         acbCostReportingMinor,
         lots: [
@@ -183,8 +334,8 @@ function applyAcquire(
           {
             acquiredJournalId: journalId,
             quantity: leg.quantity,
-            costTradeMinor: leg.tradeAmountMinor,
-            costReportingMinor: leg.reportingAmountMinor,
+            costTradeMinor: legCostTrade,
+            costReportingMinor: legCostReporting,
           },
         ],
       });
@@ -198,16 +349,17 @@ function applyAcquire(
     quantity: leg.quantity,
     tradeCurrency: leg.tradeCurrency,
     method,
-    acbCostTradeMinor: leg.tradeAmountMinor,
-    acbCostReportingMinor: leg.reportingAmountMinor,
+    costState: legCostState,
+    acbCostTradeMinor: legCostTrade,
+    acbCostReportingMinor: legCostReporting,
     lots:
       method === "FIFO"
         ? [
             {
               acquiredJournalId: journalId,
               quantity: leg.quantity,
-              costTradeMinor: leg.tradeAmountMinor,
-              costReportingMinor: leg.reportingAmountMinor,
+              costTradeMinor: legCostTrade,
+              costReportingMinor: legCostReporting,
             },
           ]
         : [],
@@ -272,8 +424,27 @@ function applyDispose(
   let costReportingMinor: bigint;
   let sourceJournalIds: string[];
   let updated: Position | undefined;
+  const costState = existing.costState;
 
-  if (method === "ACB") {
+  if (costState === "Unknown") {
+    costTradeMinor = 0n;
+    costReportingMinor = 0n;
+    sourceJournalIds = [journalId];
+
+    const remainingQtyScaled = existing.quantity.scaled - sellQtyScaled;
+    if (remainingQtyScaled === 0n) {
+      updated = undefined;
+    } else {
+      updated = {
+        ...existing,
+        quantity: { scaled: remainingQtyScaled },
+        lots:
+          method === "FIFO"
+            ? consumeFifoLotsUnknown(existing, sellQtyScaled)
+            : [],
+      };
+    }
+  } else if (method === "ACB") {
     costTradeMinor = allocateCost(
       existing.acbCostTradeMinor,
       sellQtyScaled,
@@ -306,6 +477,11 @@ function applyDispose(
     updated = fifo.position;
   }
 
+  const gainTradeMinor =
+    costState === "Unknown" ? 0n : proceedsTradeMinor - costTradeMinor;
+  const gainReportingMinor =
+    costState === "Unknown" ? 0n : proceedsReportingMinor - costReportingMinor;
+
   const gain: RealizedGain = {
     accountId: leg.accountId,
     securityId: leg.securityId,
@@ -316,8 +492,9 @@ function applyDispose(
     proceedsReportingMinor,
     costTradeMinor,
     costReportingMinor,
-    gainTradeMinor: proceedsTradeMinor - costTradeMinor,
-    gainReportingMinor: proceedsReportingMinor - costReportingMinor,
+    gainTradeMinor,
+    gainReportingMinor,
+    costState,
     sourceJournalIds,
   };
 
@@ -332,6 +509,34 @@ function applyDispose(
     positions: nextPositions,
     realized: [...realized, gain],
   };
+}
+
+function consumeFifoLotsUnknown(
+  existing: Position,
+  sellQtyScaled: bigint,
+): FifoLot[] {
+  let remaining = sellQtyScaled;
+  const lots: FifoLot[] = [];
+
+  for (const lot of existing.lots) {
+    if (remaining === 0n) {
+      lots.push(lot);
+      continue;
+    }
+
+    const take =
+      remaining < lot.quantity.scaled ? remaining : lot.quantity.scaled;
+    remaining -= take;
+
+    if (take < lot.quantity.scaled) {
+      lots.push({
+        ...lot,
+        quantity: { scaled: lot.quantity.scaled - take },
+      });
+    }
+  }
+
+  return lots;
 }
 
 function consumeFifoLots(
