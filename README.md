@@ -43,9 +43,9 @@ Open [http://localhost:3000](http://localhost:3000). The UI ships with a **demo 
 | Document | Description |
 |----------|-------------|
 | [Design spec](docs/superpowers/specs/2026-08-01-portfolio-tracker-design.md) | Product goals, architecture, and domain rules |
-| [Ledger foundation plan](docs/superpowers/plans/2026-08-01-ledger-foundation.md) | Phase 1 |
-| [Positions + cost basis](docs/superpowers/plans/2026-08-01-positions-cost-basis.md) | Phase 2 |
-| [Interest engine](docs/superpowers/plans/2026-08-01-interest-engine.md) | Phase 3 |
+| [Ledger foundation plan](docs/superpowers/plans/2026-08-01-ledger-foundation.md) | Phase 1 implementation plan and task breakdown |
+| [Positions + cost basis plan](docs/superpowers/plans/2026-08-01-positions-cost-basis.md) | Phase 2 ACB/FIFO dual-currency positions |
+| [Interest engine plan](docs/superpowers/plans/2026-08-01-interest-engine.md) | Phase 3 use-slice interest model + variance |
 | [Remaining roadmap (4–9)](docs/superpowers/plans/2026-08-01-remaining-roadmap.md) | Dollar-days, FX, openings, tax, import, UI, market data |
 
 ## Definition of done (Phases 1–9)
