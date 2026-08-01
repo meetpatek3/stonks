@@ -57,7 +57,7 @@ Modular monolith:
 
 ### 3.1.1 HeroUI Pro
 
-- Install via `heroui-pro` CLI / `@heroui-pro/react` postinstall; CI and Docker builds use `HEROUI_AUTH_TOKEN` (CI/CD token from the HeroUI dashboard). Never commit the token; keep it in env / secrets only.
+- Install via `heroui-pro` CLI / `@heroui-pro/react` postinstall; CI and Docker builds use `HEROUI_AUTH_TOKEN` (CI/CD token from the HeroUI dashboard). Never commit the token; keep it in `.env` / secrets only (see `.env.example`).
 - CSS import order in `globals.css`:
 
 ```css
