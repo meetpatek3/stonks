@@ -209,7 +209,7 @@ Migrations via Drizzle from day one. No float money columns.
 ### 5.3 Ledger
 
 - `journal(id, household_id, type, trade_date, sort_key, memo, external_natural_key, source, status, supersedes_journal_id, created_at, …)`
-  - Unique `(household_id, trade_date, sort_key)` among non-superseded rows (or enforce in domain with clear reorder API).
+  - Unique partial index on `(household_id, trade_date, sort_key)` where `status = 'POSTED'`. Reorder is an explicit audited domain operation that rewrites `sort_key` values (with audit_event rows), not silent re-sorting.
 - `posting(id, journal_id, account_id, amount_minor, quantity, security_id, trade_currency, reporting_amount_minor, fx_rate_n, fx_rate_d, …)`
 - `journal_facility_use(journal_id, use, amount_minor | weight)` — covers 100% of draw
 - `audit_event(…)`
@@ -235,10 +235,11 @@ Migrations via Drizzle from day one. No float money columns.
 
 ### 5.7 Sign convention
 
-Documented and tested once:
+Fixed for this project (documented and tested once):
 
-- Signed amounts: asset/expense increase = positive (debit); liability/equity/income increase = negative (credit) **or** the inverse — pick one in implementation and never mix.
-- Credit facility “balance owed” is displayed as a positive liability to humans; storage follows the single signed convention.
+- Storage uses **signed debit-positive** amounts: asset/expense increase = positive; liability/equity/income increase = negative.
+- Every posted journal’s postings sum to zero under this convention.
+- Credit facility “balance owed” is **displayed** as a positive liability to humans; storage remains debit-positive (a drawn facility has a negative account balance).
 
 ---
 
