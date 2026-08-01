@@ -1,0 +1,10 @@
+.env
+.env.*
+!.env.example
+.superpowers/
+
+node_modules/
+dist/
+.next/
+*.tsbuildinfo
+.pnpm-debug.log*
