@@ -4,3 +4,6 @@ export * from "./account";
 export * from "./journal";
 export * from "./posting";
 export * from "./journal_facility_use";
+export * from "./benchmark_rate";
+export * from "./credit_facility_terms";
+export * from "./interest_model_run";
