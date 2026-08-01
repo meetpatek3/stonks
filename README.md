@@ -43,17 +43,29 @@ Open [http://localhost:3000](http://localhost:3000). API smoke checks:
 |----------|-------------|
 | [Design spec](docs/superpowers/specs/2026-08-01-portfolio-tracker-design.md) | Product goals, architecture, and domain rules |
 | [Ledger foundation plan](docs/superpowers/plans/2026-08-01-ledger-foundation.md) | Phase 1 implementation plan and task breakdown |
+| [Interest engine plan](docs/superpowers/plans/2026-08-01-interest-engine.md) | Phase 3 use-slice interest model + variance |
 
 ## Phase 1 definition of done
 
 Track progress in the [ledger foundation plan](docs/superpowers/plans/2026-08-01-ledger-foundation.md#phase-1-definition-of-done):
 
-- [ ] `@stonks/ledger` unit + property tests green
-- [ ] Worked deposit/transfer fixture balances match hand calculation
-- [ ] Same-day ordering and sell-before-buy tests green
-- [ ] Docker Postgres migrates; journal repo round-trip works
-- [ ] Next health + balances API responds
-- [ ] No `number` used for money in `packages/ledger` or money columns in DB
+- [x] `@stonks/ledger` unit + property tests green
+- [x] Worked deposit/transfer fixture balances match hand calculation
+- [x] Same-day ordering and sell-before-buy tests green
+- [x] Docker Postgres migrates; journal repo round-trip works
+- [x] Next health + balances API responds
+- [x] No `number` used for money in `packages/ledger` or money columns in DB
+
+## Phase 3 definition of done
+
+Track progress in the [interest engine plan](docs/superpowers/plans/2026-08-01-interest-engine.md#phase-3-definition-of-done):
+
+- [x] Use-slice fold keeps `sum(slices) === owed` after draws/repays
+- [x] Daily accrual fixture matches hand calculation
+- [x] Slice interest sums exactly to total each day
+- [x] Variance = modelled − actual `INTEREST_CHARGED`
+- [x] DB migration for benchmarks / terms / interest_model_run
+- [x] No float money paths in interest code
 
 ## Monorepo layout
 

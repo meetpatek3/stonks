@@ -1,0 +1,10 @@
+{
+  "narrative": "Two draws then proportional repay; slice sums match facility owed",
+  "expectedAfterRepay": {
+    "facilityBalanceMinor": "-90000",
+    "slices": {
+      "INVESTMENT": "60000",
+      "PERSONAL": "30000"
+    }
+  }
+}
