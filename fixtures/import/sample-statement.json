@@ -1,0 +1,9 @@
+{
+  "id": "stmt-cash-2024-q1",
+  "accountId": "cash",
+  "periodStart": "2024-01-01",
+  "periodEnd": "2024-03-31",
+  "statedBalanceMinor": "60000",
+  "statedAsOf": "2024-03-31",
+  "sourceLabel": "Broker statement Q1 2024"
+}

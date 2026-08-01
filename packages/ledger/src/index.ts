@@ -31,6 +31,7 @@ export type {
   JournalId,
   Posting,
   FacilityUseLine,
+  CorporateAction,
   Journal,
   Account,
 } from "./ledger/types.js";
@@ -52,6 +53,9 @@ export type {
   SecurityLeg,
   PositionState,
 } from "./ledger/positions.js";
+
+export type { CostState, CostBasisState } from "./ledger/cost-basis-state.js";
+export { isUnknownCost } from "./ledger/cost-basis-state.js";
 
 export {
   emptyLedgerState,
