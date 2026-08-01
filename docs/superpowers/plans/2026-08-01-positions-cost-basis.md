@@ -602,12 +602,12 @@ git commit -m "docs: positions/cost-basis plan and Phase 2 checklist"
 
 ## Phase 2 definition of done
 
-- [ ] `@stonks/ledger` ACB unit tests + fixture green
-- [ ] FIFO unit tests + fixture green
-- [ ] Dual-currency worked example green
-- [ ] `replay` returns positions and realized gains
-- [ ] Property tests for cost identity / qty sync green
-- [ ] No `number` used for money, quantities, or cost allocations in new ledger code
+- [x] `@stonks/ledger` ACB unit tests + fixture green
+- [x] FIFO unit tests + fixture green
+- [x] Dual-currency worked example green
+- [x] `replay` returns positions and realized gains
+- [x] Property tests for cost identity / qty sync green
+- [x] No `number` used for money, quantities, or cost allocations in new ledger code
 
 ## Self-review (plan author)
 

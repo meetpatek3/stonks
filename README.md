@@ -60,12 +60,12 @@ Track progress in the [ledger foundation plan](docs/superpowers/plans/2026-08-01
 
 Track progress in the [positions + cost basis plan](docs/superpowers/plans/2026-08-01-positions-cost-basis.md#phase-2-definition-of-done):
 
-- [ ] ACB worked fixture matches hand calculation
-- [ ] FIFO worked fixture matches hand calculation
-- [ ] Dual-currency ACB fixture matches hand calculation
-- [ ] Replay exposes `positions` + `realized`
-- [ ] Property tests green
-- [ ] No `number` for money/qty/cost paths in new ledger code
+- [x] ACB worked fixture matches hand calculation
+- [x] FIFO worked fixture matches hand calculation
+- [x] Dual-currency ACB fixture matches hand calculation
+- [x] Replay exposes `positions` + `realized`
+- [x] Property tests green
+- [x] No `number` for money/qty/cost paths in new ledger code
 
 ## Monorepo layout
 
