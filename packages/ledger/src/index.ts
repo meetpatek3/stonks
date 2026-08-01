@@ -91,3 +91,12 @@ export type {
   InterestVariance,
 } from "./interest/types.js";
 export { FACILITY_USES } from "./interest/types.js";
+
+export type {
+  TaxFlagCode,
+  TaxFlag,
+  TaxYearSummary,
+  CanadaTaxYearArgs,
+  JurisdictionModule,
+} from "./tax/types.js";
+export { summarizeCanadaTaxYear, CanadaJurisdiction } from "./tax/canada.js";
