@@ -12,9 +12,11 @@
   "scripts": {
     "generate": "drizzle-kit generate",
     "migrate": "tsx src/migrate.ts",
+    "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@stonks/ledger": "workspace:*",
     "drizzle-orm": "^0.39.3",
     "postgres": "^3.4.5"
   },
@@ -23,6 +25,7 @@
     "dotenv": "^16.4.7",
     "drizzle-kit": "^0.30.4",
     "tsx": "^4.19.2",
-    "typescript": "^5.7.3"
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.5"
   }
 }
