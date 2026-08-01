@@ -1,4 +1,4 @@
-import { demoPortfolio, formatCadMinor } from "../../lib/demo-portfolio";
+import { demoPortfolio, formatCadMinor } from "@/lib/demo-portfolio";
 
 export default function TaxPage() {
   const t = demoPortfolio.tax;

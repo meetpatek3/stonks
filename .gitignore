@@ -8,3 +8,5 @@ dist/
 .next/
 *.tsbuildinfo
 .pnpm-debug.log*
+.vercel
+.env*

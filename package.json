@@ -3,13 +3,25 @@
   "private": true,
   "packageManager": "pnpm@9.15.0",
   "scripts": {
+    "dev": "pnpm --filter @stonks/web dev",
+    "build": "pnpm --filter @stonks/web build",
+    "migrate": "pnpm --filter @stonks/db migrate",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",
     "lint": "pnpm -r lint"
   },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "heroui-pro",
+      "@heroui-pro/react",
+      "esbuild",
+      "sharp"
+    ]
+  },
   "devDependencies": {
+    "dotenv-cli": "^11.0.0",
+    "fast-check": "^4.0.0",
     "typescript": "^5.7.3",
-    "vitest": "^3.0.5",
-    "fast-check": "^4.0.0"
+    "vitest": "^3.0.5"
   }
 }
