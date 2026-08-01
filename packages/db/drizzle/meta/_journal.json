@@ -22,6 +22,13 @@
       "when": 1785563439888,
       "tag": "0002_import_reconciliation",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1785595887473,
+      "tag": "0003_household_auth",
+      "breakpoints": true
     }
   ]
 }

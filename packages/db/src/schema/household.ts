@@ -11,6 +11,7 @@ export const household = pgTable("household", {
   defaultCostBasisMethod: costBasisMethodEnum("default_cost_basis_method")
     .notNull()
     .default("ACB"),
+  authUsername: text("auth_username").unique(),
   authPasswordHash: text("auth_password_hash"),
   timezone: text("timezone").notNull().default("America/Toronto"),
 });
