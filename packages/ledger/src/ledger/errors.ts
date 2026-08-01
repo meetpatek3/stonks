@@ -6,7 +6,9 @@ export class ValidationError extends Error {
       | "NEGATIVE_QUANTITY"
       | "FACILITY_USE"
       | "CURRENCY"
-      | "UNKNOWN_ACCOUNT",
+      | "UNKNOWN_ACCOUNT"
+      | "MISSING_COST"
+      | "COST_CURRENCY",
     readonly journalIds: string[] = [],
   ) {
     super(message);

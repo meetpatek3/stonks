@@ -6,18 +6,34 @@ import {
   assertKnownAccounts,
 } from "./journal.js";
 import { applyPostingQuantities } from "./positions-qty.js";
+import {
+  applyPositionsForJournal,
+  emptyPositionState,
+  type CostBasisMethod,
+  type Position,
+  type RealizedGain,
+} from "./positions.js";
 import type { Account, AccountId, Journal } from "./types.js";
+
+export type ReplayOptions = {
+  costBasisMethod?: CostBasisMethod;
+};
 
 export type LedgerState = {
   balances: Map<AccountId, Money>;
   quantities: Map<string, Quantity>;
+  positions: Map<string, Position>;
+  realized: RealizedGain[];
   ledgerVersion: number;
 };
 
 export function emptyLedgerState(_reportingCurrency: string): LedgerState {
+  const positionState = emptyPositionState();
   return {
     balances: new Map(),
     quantities: new Map(),
+    positions: positionState.positions,
+    realized: positionState.realized,
     ledgerVersion: 0,
   };
 }
@@ -40,6 +56,7 @@ export function applyJournal(
   state: LedgerState,
   journal: Journal,
   accounts: ReadonlyMap<AccountId, Account>,
+  options?: ReplayOptions,
 ): LedgerState {
   assertJournalBalanced(journal);
   assertKnownAccounts(journal, accounts);
@@ -58,9 +75,18 @@ export function applyJournal(
     journal.id,
   );
 
+  const method = options?.costBasisMethod ?? "ACB";
+  const positionState = applyPositionsForJournal(
+    { positions: state.positions, realized: state.realized },
+    journal,
+    method,
+  );
+
   return {
     balances,
     quantities,
+    positions: positionState.positions,
+    realized: positionState.realized,
     ledgerVersion: state.ledgerVersion + 1,
   };
 }
@@ -69,11 +95,12 @@ export function replay(
   journals: readonly Journal[],
   accounts: ReadonlyMap<AccountId, Account>,
   reportingCurrency: string,
+  options?: ReplayOptions,
 ): LedgerState {
   let state = emptyLedgerState(reportingCurrency);
 
   for (const journal of sortJournals(journals)) {
-    state = applyJournal(state, journal, accounts);
+    state = applyJournal(state, journal, accounts, options);
   }
 
   return state;

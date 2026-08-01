@@ -1,0 +1,18 @@
+{
+  "method": "ACB",
+  "reportingCurrency": "CAD",
+  "narrative": "Two buys then half sell; ACB average",
+  "expectedAfter": {
+    "positionKey": "investment:AAPL",
+    "quantity": "100.00000000",
+    "acbCostReportingMinor": "110000",
+    "realized": [
+      {
+        "journalId": "j-sell",
+        "costReportingMinor": "110000",
+        "proceedsReportingMinor": "150000",
+        "gainReportingMinor": "40000"
+      }
+    ]
+  }
+}
