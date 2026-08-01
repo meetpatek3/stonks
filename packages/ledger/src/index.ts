@@ -37,10 +37,26 @@ export type {
 
 export { assertJournalBalanced, assertFacilityUseComplete } from "./ledger/journal.js";
 
+export { positionKey } from "./ledger/positions-qty.js";
+
+export {
+  emptyPositionState,
+  extractSecurityLegs,
+  applyPositionsForJournal,
+} from "./ledger/positions.js";
+export type {
+  CostBasisMethod,
+  FifoLot,
+  Position,
+  RealizedGain,
+  SecurityLeg,
+  PositionState,
+} from "./ledger/positions.js";
+
 export {
   emptyLedgerState,
   sortJournals,
   applyJournal,
   replay,
 } from "./ledger/replay.js";
-export type { LedgerState } from "./ledger/replay.js";
+export type { LedgerState, ReplayOptions } from "./ledger/replay.js";
