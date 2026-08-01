@@ -16,7 +16,7 @@ export {
 } from "./money/quantity.js";
 export type { Quantity } from "./money/quantity.js";
 
-export { mulDivFloor, allocateCost } from "./money/rationals.js";
+export { mulDivFloor, allocateCost, allocateExact } from "./money/rationals.js";
 
 export { ValidationError } from "./ledger/errors.js";
 
@@ -60,3 +60,34 @@ export {
   replay,
 } from "./ledger/replay.js";
 export type { LedgerState, ReplayOptions } from "./ledger/replay.js";
+
+export {
+  dayCountDenominator,
+  calendarDaysBetween,
+  addCalendarDays,
+} from "./interest/day-count.js";
+
+export {
+  emptyFacilitySliceState,
+  applyFacilityJournal,
+  replayFacilitySlices,
+  facilitySlicesAsOf,
+  sumSlices,
+} from "./interest/use-slices.js";
+export type { FacilitySliceState } from "./interest/use-slices.js";
+
+export { rateBpsOnDate, modelInterest } from "./interest/accrue.js";
+
+export { actualInterestCharged, interestVariance } from "./interest/variance.js";
+
+export type {
+  DayCount,
+  PostingDayRule,
+  UseSliceBalances,
+  BenchmarkRatePoint,
+  FacilityTerms,
+  InterestDaySlice,
+  InterestModelResult,
+  InterestVariance,
+} from "./interest/types.js";
+export { FACILITY_USES } from "./interest/types.js";

@@ -44,6 +44,7 @@ Open [http://localhost:3000](http://localhost:3000). API smoke checks:
 | [Design spec](docs/superpowers/specs/2026-08-01-portfolio-tracker-design.md) | Product goals, architecture, and domain rules |
 | [Ledger foundation plan](docs/superpowers/plans/2026-08-01-ledger-foundation.md) | Phase 1 implementation plan and task breakdown |
 | [Positions + cost basis plan](docs/superpowers/plans/2026-08-01-positions-cost-basis.md) | Phase 2 ACB/FIFO dual-currency positions |
+| [Interest engine plan](docs/superpowers/plans/2026-08-01-interest-engine.md) | Phase 3 use-slice interest model + variance |
 
 ## Phase 1 definition of done
 
@@ -66,6 +67,17 @@ Track progress in the [positions + cost basis plan](docs/superpowers/plans/2026-
 - [x] Replay exposes `positions` + `realized`
 - [x] Property tests green
 - [x] No `number` for money/qty/cost paths in new ledger code
+
+## Phase 3 definition of done
+
+Track progress in the [interest engine plan](docs/superpowers/plans/2026-08-01-interest-engine.md#phase-3-definition-of-done):
+
+- [x] Use-slice fold keeps `sum(slices) === owed` after draws/repays
+- [x] Daily accrual fixture matches hand calculation
+- [x] Slice interest sums exactly to total each day
+- [x] Variance = modelled − actual `INTEREST_CHARGED`
+- [x] DB migration for benchmarks / terms / interest_model_run
+- [x] No float money paths in interest code
 
 ## Monorepo layout
 

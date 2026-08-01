@@ -278,3 +278,79 @@ export const buySellChainArb: fc.Arbitrary<BuySellChain> = fc
       totalBuyCostReporting,
     };
   });
+
+export function facilityAccountsMap(): Map<string, Account> {
+  return new Map([
+    ["facility", { id: "facility", type: "CREDIT_FACILITY", currency: "CAD" }],
+    ["investment", { id: "investment", type: "INVESTMENT", currency: "CAD" }],
+    ["cash", { id: "cash", type: "CASH", currency: "CAD" }],
+    ["ext", { id: "ext", type: "EXTERNAL", currency: "CAD" }],
+  ]);
+}
+
+export type FacilityDrawRepayChain = {
+  journals: Journal[];
+  accounts: Map<string, Account>;
+};
+
+/** Draws with facility uses, then smaller proportional repays — never oversell owed. */
+export const facilityDrawRepayChainArb: fc.Arbitrary<FacilityDrawRepayChain> = fc
+  .record({
+    draws: fc.array(
+      fc.record({
+        id: journalIdArb,
+        amount: fc.bigInt({ min: 1_00n, max: 50_000_00n }),
+        use: fc.constantFrom(
+          "INVESTMENT" as const,
+          "LENDING" as const,
+          "PERSONAL" as const,
+          "OTHER" as const,
+        ),
+      }),
+      { minLength: 1, maxLength: 5 },
+    ),
+    repayFraction: fc.integer({ min: 0, max: 80 }),
+  })
+  .map(({ draws, repayFraction }) => {
+    const journals: Journal[] = [];
+    let day = 1;
+    let owed = 0n;
+
+    for (const draw of draws) {
+      journals.push({
+        id: draw.id,
+        type: "TRANSFER",
+        tradeDate: `2024-01-${String(day).padStart(2, "0")}`,
+        sortKey: 0,
+        status: "POSTED",
+        source: "MANUAL",
+        postings: [
+          { accountId: "facility", amount: money(CAD, -draw.amount) },
+          { accountId: "investment", amount: money(CAD, draw.amount) },
+        ],
+        facilityUses: [{ use: draw.use, amount: money(CAD, draw.amount) }],
+      });
+      owed += draw.amount;
+      day += 1;
+    }
+
+    if (repayFraction > 0 && owed > 0n) {
+      const repay = (owed * BigInt(repayFraction)) / 100n;
+      if (repay > 0n) {
+        journals.push({
+          id: `repay-${draws[0]!.id}`,
+          type: "TRANSFER",
+          tradeDate: `2024-01-${String(Math.min(day, 28)).padStart(2, "0")}`,
+          sortKey: 0,
+          status: "POSTED",
+          source: "MANUAL",
+          postings: [
+            { accountId: "cash", amount: money(CAD, -repay) },
+            { accountId: "facility", amount: money(CAD, repay) },
+          ],
+        });
+      }
+    }
+
+    return { journals, accounts: facilityAccountsMap() };
+  });
