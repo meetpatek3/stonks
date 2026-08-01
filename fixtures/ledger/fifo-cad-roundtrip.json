@@ -1,0 +1,18 @@
+{
+  "method": "FIFO",
+  "reportingCurrency": "CAD",
+  "narrative": "Two buys then sell first lot; FIFO",
+  "expectedAfter": {
+    "positionKey": "investment:AAPL",
+    "quantity": "100.00000000",
+    "acbCostReportingMinor": "120000",
+    "realized": [
+      {
+        "journalId": "j-sell",
+        "costReportingMinor": "100000",
+        "proceedsReportingMinor": "150000",
+        "gainReportingMinor": "50000"
+      }
+    ]
+  }
+}
