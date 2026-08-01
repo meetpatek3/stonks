@@ -15,3 +15,22 @@ export {
   qtyIsZero,
 } from "./money/quantity.js";
 export type { Quantity } from "./money/quantity.js";
+
+export { ValidationError } from "./ledger/errors.js";
+
+export type {
+  AccountType,
+  JournalType,
+  JournalStatus,
+  JournalSource,
+  FacilityUse,
+  AccountId,
+  SecurityId,
+  JournalId,
+  Posting,
+  FacilityUseLine,
+  Journal,
+  Account,
+} from "./ledger/types.js";
+
+export { assertJournalBalanced, assertFacilityUseComplete } from "./ledger/journal.js";
