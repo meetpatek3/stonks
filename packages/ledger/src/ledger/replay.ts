@@ -1,15 +1,19 @@
 import { add, money, type Money } from "../money/money.js";
+import type { Quantity } from "../money/quantity.js";
 import { assertFacilityUseComplete, assertJournalBalanced } from "./journal.js";
+import { applyPostingQuantities } from "./positions-qty.js";
 import type { Account, AccountId, Journal } from "./types.js";
 
 export type LedgerState = {
   balances: Map<AccountId, Money>;
+  quantities: Map<string, Quantity>;
   ledgerVersion: number;
 };
 
 export function emptyLedgerState(_reportingCurrency: string): LedgerState {
   return {
     balances: new Map(),
+    quantities: new Map(),
     ledgerVersion: 0,
   };
 }
@@ -43,8 +47,15 @@ export function applyJournal(
     balances.set(posting.accountId, add(current, posting.amount));
   }
 
+  const quantities = applyPostingQuantities(
+    state.quantities,
+    journal.postings,
+    journal.id,
+  );
+
   return {
     balances,
+    quantities,
     ledgerVersion: state.ledgerVersion + 1,
   };
 }
