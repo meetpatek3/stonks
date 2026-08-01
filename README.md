@@ -32,9 +32,10 @@ pnpm test
 pnpm --filter @stonks/web dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). API smoke checks:
+Open [http://localhost:3000](http://localhost:3000). The UI ships with a **demo portfolio** so pages work without Postgres. API smoke checks:
 
 - [http://localhost:3000/api/health](http://localhost:3000/api/health)
+- [http://localhost:3000/api/portfolio](http://localhost:3000/api/portfolio)
 - [http://localhost:3000/api/ledger/balances](http://localhost:3000/api/ledger/balances)
 
 ## Documentation
@@ -42,47 +43,28 @@ Open [http://localhost:3000](http://localhost:3000). API smoke checks:
 | Document | Description |
 |----------|-------------|
 | [Design spec](docs/superpowers/specs/2026-08-01-portfolio-tracker-design.md) | Product goals, architecture, and domain rules |
-| [Ledger foundation plan](docs/superpowers/plans/2026-08-01-ledger-foundation.md) | Phase 1 implementation plan and task breakdown |
-| [Positions + cost basis plan](docs/superpowers/plans/2026-08-01-positions-cost-basis.md) | Phase 2 ACB/FIFO dual-currency positions |
-| [Interest engine plan](docs/superpowers/plans/2026-08-01-interest-engine.md) | Phase 3 use-slice interest model + variance |
+| [Ledger foundation plan](docs/superpowers/plans/2026-08-01-ledger-foundation.md) | Phase 1 |
+| [Positions + cost basis](docs/superpowers/plans/2026-08-01-positions-cost-basis.md) | Phase 2 |
+| [Interest engine](docs/superpowers/plans/2026-08-01-interest-engine.md) | Phase 3 |
+| [Remaining roadmap (4–9)](docs/superpowers/plans/2026-08-01-remaining-roadmap.md) | Dollar-days, FX, openings, tax, import, UI, market data |
 
-## Phase 1 definition of done
+## Definition of done (Phases 1–9)
 
-Track progress in the [ledger foundation plan](docs/superpowers/plans/2026-08-01-ledger-foundation.md#phase-1-definition-of-done):
-
-- [x] `@stonks/ledger` unit + property tests green
-- [x] Worked deposit/transfer fixture balances match hand calculation
-- [x] Same-day ordering and sell-before-buy tests green
-- [x] Docker Postgres migrates; journal repo round-trip works
-- [x] Next health + balances API responds
-- [x] No `number` used for money in `packages/ledger` or money columns in DB
-
-## Phase 2 definition of done
-
-Track progress in the [positions + cost basis plan](docs/superpowers/plans/2026-08-01-positions-cost-basis.md#phase-2-definition-of-done):
-
-- [x] ACB worked fixture matches hand calculation
-- [x] FIFO worked fixture matches hand calculation
-- [x] Dual-currency ACB fixture matches hand calculation
-- [x] Replay exposes `positions` + `realized`
-- [x] Property tests green
-- [x] No `number` for money/qty/cost paths in new ledger code
-
-## Phase 3 definition of done
-
-Track progress in the [interest engine plan](docs/superpowers/plans/2026-08-01-interest-engine.md#phase-3-definition-of-done):
-
-- [x] Use-slice fold keeps `sum(slices) === owed` after draws/repays
-- [x] Daily accrual fixture matches hand calculation
-- [x] Slice interest sums exactly to total each day
-- [x] Variance = modelled − actual `INTEREST_CHARGED`
-- [x] DB migration for benchmarks / terms / interest_model_run
-- [x] No float money paths in interest code
+- [x] Phase 1 — ledger foundation
+- [x] Phase 2 — ACB/FIFO dual-currency positions
+- [x] Phase 3 — use-slice interest + variance
+- [x] Phase 4 — dollar-day attribution + FX decomposition
+- [x] Phase 5 — openings / unknown cost / corporate actions
+- [x] Phase 6 — Canada tax (flag-only)
+- [x] Phase 7 — import match + statement reconciliation
+- [x] Phase 8 — HeroUI dark UI (overview, entry, ledger, positions, open items, tax)
+- [x] Phase 9 — market data provider interface + charts
 
 ## Monorepo layout
 
 ```
-apps/web/          Next.js App Router shell
-packages/ledger/   Pure TypeScript double-entry domain
+apps/web/          Next.js App Router + HeroUI dark UI
+packages/ledger/   Pure TypeScript domain (money → tax → import → market)
 packages/db/       Drizzle ORM + Postgres schema and migrations
+fixtures/          Hand-calculated ledger / interest / import examples
 ```

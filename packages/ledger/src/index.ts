@@ -125,3 +125,11 @@ export type {
 } from "./import/types.js";
 export { matchImportCandidates } from "./import/match.js";
 export { reconcileStatement } from "./import/reconcile.js";
+
+export type {
+  PriceQuote,
+  PriceOverride,
+  MarketDataProvider,
+} from "./market/types.js";
+export { resolvePrice } from "./market/types.js";
+export { FixtureMarketDataProvider } from "./market/fixture-provider.js";
