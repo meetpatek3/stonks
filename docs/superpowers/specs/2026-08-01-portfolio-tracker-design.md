@@ -32,6 +32,9 @@
 | Tenancy | Single household / one ledger; `household` row as future expansion point |
 | Tax | Canada module first; US (and others) as stub interface |
 | Stack | TypeScript end-to-end, Postgres, modular monolith |
+| UI kit | HeroUI OSS + **HeroUI Pro** (`@heroui/react`, `@heroui-pro/react`), Tailwind CSS v4, React 19 |
+| Theme | HeroUI **default** theme, **dark mode only** (`data-theme="dark"` / `class="dark"`). Not Brutalism / Glass / Mouve unless we intentionally switch later |
+| Charts / tickers | Prefer Pro ready-mades: `LineChart`, `AreaChart`, `BarChart`, `PieChart`, `KPI` (sparkline + trend), related Pro finance UI — do not hand-roll Recharts wrappers |
 | Auth | Local trust; optional shared password |
 | Facility use | Explicit use required on every credit-facility draw (`INVESTMENT` / `LENDING` / `PERSONAL` / `OTHER`) |
 | Import | Manual entry first; import stub with fixtures + diff/reconcile UX |
@@ -47,9 +50,23 @@ Modular monolith:
 
 - `packages/ledger` — pure domain (no React, no DB drivers). Money, journals, replay, cost basis, interest, FX, jurisdiction plugins, property tests.
 - `packages/db` — Drizzle schema, migrations, repositories that map rows ↔ domain types.
-- `apps/web` — Next.js App Router: UI + route handlers calling domain through repositories.
+- `apps/web` — Next.js App Router (React 19): UI + route handlers calling domain through repositories. Styled with HeroUI + HeroUI Pro (default dark theme).
 - `docker-compose.yml` — `postgres` + `web`.
 - `fixtures/` — worked examples and import samples.
+
+### 3.1.1 HeroUI Pro
+
+- Install via `heroui-pro` CLI / `@heroui-pro/react` postinstall; CI and Docker builds use `HEROUI_AUTH_TOKEN` (CI/CD token from the HeroUI dashboard). Never commit the token; keep it in env / secrets only.
+- CSS import order in `globals.css`:
+
+```css
+@import "tailwindcss";
+@import "@heroui/styles";
+@import "@heroui-pro/react/css";
+```
+
+- Activate default dark on `<html>` (`class="dark"` and/or `data-theme="dark"`). No Pro theme pack import (brutalism/glass/mouve) in v1.
+- Domain/accounting code stays in `packages/ledger` with zero UI imports; only `apps/web` depends on HeroUI.
 
 ### 3.2 Why not alternatives
 
@@ -278,17 +295,24 @@ Traceability: every derived DTO includes `source_journal_ids` (and lot/slice ids
 
 ## 8. Interface (after core)
 
-Responsive web (desktop + mobile):
+Responsive web (desktop + mobile), **HeroUI default dark theme**:
 
-- **Fast transaction entry** — under ~15s on phone; defaults + recently used values.
-- Portfolio overview
-- Per-position detail with full cost breakdown (gross vs net of borrow cost, labeled)
+- **Fast transaction entry** — under ~15s on phone; defaults + recently used values; HeroUI form controls.
+- Portfolio overview — Pro `KPI` cards for headline metrics (net worth, period return net of costs, open data-quality count) with sparklines where useful.
+- Per-position detail with full cost breakdown (gross vs net of borrow cost, labeled); ticker/symbol display via Pro components where they fit.
 - Transaction ledger with filters
 - Account balances
 - Tax year summary (disclaimer)
 - Open items / data quality (unknown basis, reconcile mismatches, model variance, validation errors)
 
-Charts (after numbers trusted): allocation, value over time, benchmark comparison. Default returns **net of all costs**, gross available, clearly labeled.
+Charts (after numbers trusted), built with **HeroUI Pro chart components** (not custom Recharts wrappers):
+
+- Allocation — `PieChart` / related
+- Value over time — `AreaChart` / `LineChart`
+- Benchmark comparison — multi-series `LineChart`
+- Position / account “tickers” — `KPI` + `KPI.Chart` sparklines and trend chips
+
+Default returns **net of all costs**, gross available, clearly labeled. Chart series use Pro `--chart-*` tokens.
 
 Auth: optional password; suitable behind localhost/LAN or reverse proxy later.
 
@@ -315,8 +339,8 @@ Auth: optional password; suitable behind localhost/LAN or reverse proxy later.
 6. Opening positions, unknown cost, corporate-action journal representations
 7. Canada tax module (flag-only superficial loss / contribution)
 8. Import stub + reconciliation report on fixtures
-9. Minimal UI: entry, ledger, positions, open items, tax summary
-10. Market data provider interface + overrides + charts
+9. Minimal UI shell: HeroUI Pro install, default dark theme, entry + ledger + positions + open items + tax summary (KPI/forms first)
+10. Market data provider interface + overrides + Pro charts (allocation, value over time, benchmark, sparklines)
 
 **Core done when:** accounting invariants hold under tests above; reconciliation report exists for fixture statements; UI may still be minimal.
 
