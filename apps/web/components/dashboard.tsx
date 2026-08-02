@@ -5,7 +5,8 @@ import { EmptyState } from "@heroui-pro/react/empty-state";
 import { KPI } from "@heroui-pro/react/kpi";
 import { KPIGroup } from "@heroui-pro/react/kpi-group";
 import { Icon } from "@iconify/react";
-import { formatMoney, type PortfolioSnapshot } from "@/lib/portfolio-shared";
+import { formatMoney } from "@/lib/format";
+import type { PortfolioSnapshot } from "@/lib/portfolio-shared";
 
 type DashboardProps = {
   snapshot: PortfolioSnapshot;
