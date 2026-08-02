@@ -81,14 +81,11 @@ export type PortfolioSnapshot = {
   message?: string | undefined;
 };
 
-export const ACCOUNT_TYPES: readonly AccountType[] = [
-  "INVESTMENT",
-  "CREDIT_FACILITY",
-  "RECEIVABLE",
-  "CASH",
-  "EXTERNAL",
-];
-
+/**
+ * One empty bucket per `AccountType`. Written as an exhaustive literal so
+ * that adding a member to the ledger's union is a compile error here rather
+ * than a silently missing group.
+ */
 export function emptyBalancesByType(): Record<AccountType, BalanceRow[]> {
   return {
     INVESTMENT: [],

@@ -97,15 +97,20 @@ export function derivePortfolioSnapshot(
   let totalsAreUncertain = false;
 
   for (const [accountId, balance] of state.balances) {
+    const type = metaById.get(accountId)?.type;
+
+    // EXTERNAL accounts model the outside world, so they never contribute to
+    // any total. Skip them before the currency test: dropping one loses
+    // nothing, and flagging uncertainty for it would claim the totals are
+    // incomplete when they are not.
+    if (type === "EXTERNAL") {
+      continue;
+    }
+
     if (balance.currency !== reportingCurrency) {
       // No FX rate available to state this in the reporting currency, so it
       // is excluded from the totals and the uncertainty is flagged instead.
       totalsAreUncertain = true;
-      continue;
-    }
-
-    const type = metaById.get(accountId)?.type;
-    if (type === "EXTERNAL") {
       continue;
     }
 
