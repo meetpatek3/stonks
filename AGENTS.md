@@ -11,7 +11,7 @@ Self-hosted portfolio tracker. Double-entry ledger is source of truth; balances/
 
 ## Stack
 
-- UI: HeroUI v3 (`@heroui/react`) + HeroUI Pro (`@heroui-pro/react`) with **glass** theme from attached Pro theme (keep `apps/web/app/globals.css` Pro overrides intact; Inter is intentional for that theme)
+- UI: HeroUI v3 (`@heroui/react`) + HeroUI Pro (`@heroui-pro/react`) on the stock HeroUI **default dark** theme — no custom CSS. `apps/web/app/globals.css` must contain only the three import statements (see the Task 1 plan's Global Constraints); do not add custom properties, `@theme` rules, or a custom font
 - Auth: simple username/password → signed cookie (`AUTH_SECRET`, `jose`). Bootstrap first household from `AUTH_USERNAME` / `AUTH_PASSWORD` when DB empty. Credentials stored on `household.auth_username` / `auth_password_hash`
 - DB: Postgres via Docker locally; **Neon** on Vercel (`DATABASE_URL`). Drizzle uses `postgres` (postgres.js) with `prepare: false` / `max: 1` on Vercel
 - Package manager: pnpm workspaces. HeroUI Pro needs `HEROUI_AUTH_TOKEN` at install (Infisical key `HEROUI_AUTH_TOKEN`)
