@@ -24,6 +24,7 @@ import {
   type FacilityUse,
   type Journal,
   type LedgerState,
+  type RealizedGain,
 } from "@stonks/ledger";
 import { formatMoney } from "@/lib/format";
 import type { ResolvedPrice } from "@/lib/market/price-service";
@@ -147,6 +148,9 @@ type PositionCore = Pick<
   | "tradeCurrency"
   | "costReportingMinor"
   | "costIsUnknown"
+  | "realizedGainReportingMinor"
+  | "realizedGainUncertaintyReason"
+  | "realizedSourceJournalIds"
 >;
 
 export function derivePortfolioSnapshot(
@@ -199,6 +203,14 @@ export function derivePortfolioSnapshot(
   const totals = sumTotals(state, metaById, reportingCurrency);
 
   const core: PositionCore[] = [];
+  const realizedByKey = new Map<string, RealizedGain[]>();
+  for (const gain of state.realized) {
+    const key = `${gain.accountId}:${gain.securityId}`;
+    const list = realizedByKey.get(key) ?? [];
+    list.push(gain);
+    realizedByKey.set(key, list);
+  }
+
   for (const [key, position] of state.positions) {
     const costUnknown = isUnknownCost(position.costState);
     core.push({
@@ -212,6 +224,7 @@ export function derivePortfolioSnapshot(
         ? null
         : position.acbCostReportingMinor.toString(),
       costIsUnknown: costUnknown,
+      ...summarizeRealized(key, position.securityId, realizedByKey.get(key) ?? []),
     });
   }
   core.sort((a, b) => a.key.localeCompare(b.key));
@@ -414,6 +427,51 @@ function deriveAllocation(positions: readonly PositionCore[]): {
   }));
 
   return { allocation, allocationIsIncomplete: omitted, zeroCost };
+}
+
+/**
+ * One holding's realized gains to date, summed from replay's disposition
+ * records.
+ *
+ * The sum is stated only when every disposition of the holding had a known
+ * cost basis: the ledger records an unknown-cost disposition's gain as zero
+ * by construction, so summing across a mix would understate without saying
+ * so. One unknown-cost sale nulls the figure with a reason; the source
+ * journals stay listed either way, so the answer remains traceable.
+ */
+function summarizeRealized(
+  key: string,
+  symbol: string,
+  gains: readonly RealizedGain[],
+): Pick<
+  PositionRow,
+  | "realizedGainReportingMinor"
+  | "realizedGainUncertaintyReason"
+  | "realizedSourceJournalIds"
+> {
+  const sourceJournalIds = [
+    ...new Set(gains.flatMap((gain) => gain.sourceJournalIds)),
+  ].sort();
+
+  if (gains.some((gain) => isUnknownCost(gain.costState))) {
+    return {
+      realizedGainReportingMinor: null,
+      realizedGainUncertaintyReason:
+        `${symbol} was sold with no recorded cost basis, so the realized gain ` +
+        `to date on ${key} cannot be stated.`,
+      realizedSourceJournalIds: sourceJournalIds,
+    };
+  }
+
+  let total = 0n;
+  for (const gain of gains) {
+    total += gain.gainReportingMinor;
+  }
+  return {
+    realizedGainReportingMinor: total.toString(),
+    realizedGainUncertaintyReason: null,
+    realizedSourceJournalIds: sourceJournalIds,
+  };
 }
 
 /* ------------------------------------------------------------------ */

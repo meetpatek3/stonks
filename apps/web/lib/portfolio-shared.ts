@@ -47,6 +47,22 @@ export type PositionRow = {
   /** Driven by the ledger's `isUnknownCost` on the position's cost state. */
   costIsUnknown: boolean;
 
+  /**
+   * Realized gains to date from this holding's dispositions, in the reporting
+   * currency, minor units — summed from replay's own `RealizedGain` records.
+   *
+   * `null` when any disposition of this holding had an unknown cost basis
+   * (the ledger records such a gain as zero by construction, so a sum would
+   * understate); the reason is then in `realizedGainUncertaintyReason`. A
+   * real `"0"` means no dispositions or break-even sales — a fact, not a
+   * stand-in.
+   */
+  realizedGainReportingMinor: string | null;
+  /** Why `realizedGainReportingMinor` is null; null when the figure is stated. */
+  realizedGainUncertaintyReason: string | null;
+  /** Journals whose dispositions produced the realized figure (traceable). */
+  realizedSourceJournalIds: string[];
+
   /* --- Valuation. A field below is `null` when it is not derivable, with --- */
   /* --- the reason in `valuationUncertaintyReasons` — never a `"0"` that  --- */
   /* --- would read as a derived figure. A `"0"` that *is* there is a real --- */

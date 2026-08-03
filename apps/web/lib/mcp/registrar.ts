@@ -1,6 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { ApiTokenScope } from "@stonks/db";
+import type { AccountRepo, ApiTokenScope, JournalListFilters } from "@stonks/db";
+import type { Journal } from "@stonks/ledger";
 import { z } from "zod";
+import type { PortfolioSnapshot } from "@/lib/portfolio-shared";
 import { toolError, toToolError } from "./errors";
 
 /**
@@ -44,9 +46,29 @@ export interface HouseholdInfoRepo {
   getReportingCurrency(householdId: string): Promise<string | null>;
 }
 
+/**
+ * The portfolio read model, as a repo-shaped dependency. Production wires
+ * this to `getPortfolioSnapshot`; tests inject a hand-built snapshot. Every
+ * figure it returns is derived by replay — tool handlers never compute a
+ * balance, cost basis, or return themselves.
+ */
+export interface PortfolioSnapshotRepo {
+  getSnapshot(householdId: string): Promise<PortfolioSnapshot>;
+}
+
+/** The journal-history reads, narrowed from `JournalRepo` so fakes stay small. */
+export interface JournalReadRepo {
+  listAll(householdId: string, filters?: JournalListFilters): Promise<Journal[]>;
+  getById(householdId: string, id: string): Promise<Journal | null>;
+  findSupersedingId(householdId: string, journalId: string): Promise<string | null>;
+}
+
 /** Repos injected into every tool handler. Later tasks extend this. */
 export interface McpRepos {
   household: HouseholdInfoRepo;
+  portfolio: PortfolioSnapshotRepo;
+  accounts: AccountRepo;
+  journals: JournalReadRepo;
 }
 
 export interface McpToolContext {

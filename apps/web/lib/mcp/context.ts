@@ -1,4 +1,11 @@
-import { eq, household, type Db } from "@stonks/db";
+import {
+  createAccountRepo,
+  createJournalRepo,
+  eq,
+  household,
+  type Db,
+} from "@stonks/db";
+import { getPortfolioSnapshot } from "@/lib/portfolio";
 import type { HouseholdInfoRepo, McpToolContext } from "./registrar";
 import type { McpAuth } from "./auth";
 
@@ -31,6 +38,13 @@ export function createToolContext(db: Db, auth: McpAuth): McpToolContext {
     scope: auth.scope,
     repos: {
       household: createHouseholdInfoRepo(db),
+      portfolio: {
+        // The same request-scoped read model the pages use; every figure in
+        // it is derived by replay, never stored.
+        getSnapshot: (householdId) => getPortfolioSnapshot(db, householdId),
+      },
+      accounts: createAccountRepo(db),
+      journals: createJournalRepo(db),
     },
   };
 }

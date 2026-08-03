@@ -16,6 +16,7 @@ import {
   type McpToolContext,
 } from "@/lib/mcp/registrar";
 import { z } from "zod";
+import { makeTestCtx } from "./helpers/mcp-test-utils";
 
 /**
  * Scaffold tests for the MCP server frame: shared money schemas, bearer auth,
@@ -131,13 +132,7 @@ describe("authenticateMcpRequest", () => {
   });
 });
 
-const ctx = (scope: "read" | "read_write"): McpToolContext => ({
-  householdId: "hh-1",
-  scope,
-  repos: {
-    household: { getReportingCurrency: async () => "CAD" },
-  },
-});
+const ctx = (scope: "read" | "read_write"): McpToolContext => makeTestCtx({ scope });
 
 describe("tool registrar", () => {
   const writeTool = (handler: ReturnType<typeof vi.fn>) =>
