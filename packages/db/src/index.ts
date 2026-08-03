@@ -1,6 +1,13 @@
 export * from "./schema/index";
 export { createDb, type Db } from "./client";
-export { createJournalRepo, type JournalRepo } from "./repos/journal-repo";
+export {
+  createJournalRepo,
+  decodeJournalCursor,
+  encodeJournalCursor,
+  type JournalCursor,
+  type JournalListFilters,
+  type JournalRepo,
+} from "./repos/journal-repo";
 export {
   createPriceRepo,
   type PriceRepo,

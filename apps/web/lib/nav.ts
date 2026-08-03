@@ -27,6 +27,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { href: "/tax", label: "Tax", icon: "gravity-ui:receipt" },
   { href: "/open-items", label: "Open Items", icon: "gravity-ui:circle-exclamation" },
   { href: "/entry", label: "New Entry", icon: "gravity-ui:square-plus" },
+  { href: "/settings", label: "Settings", icon: "gravity-ui:gear" },
 ];
 
 /** Drop a trailing slash and any query/hash, so `/positions/` === `/positions`. */

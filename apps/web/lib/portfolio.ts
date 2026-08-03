@@ -311,7 +311,9 @@ export async function loadSessionJournalRows(): Promise<{
     return { rows: [], accounts, message: "no accounts" };
   }
 
-  const journals = await createJournalRepo(db).listAll(householdId);
+  const journals = await createJournalRepo(db).listAll(householdId, {
+    includeSuperseded: true,
+  });
   return { rows: toJournalRows(journals, accounts), accounts };
 }
 
