@@ -1,5 +1,6 @@
 import {
   account,
+  createFacilityTermsRepo,
   createJournalRepo,
   createPriceRepo,
   currency,
@@ -18,6 +19,7 @@ import {
   derivePortfolioSnapshot,
   heldSecurityIds,
   type AccountMeta,
+  type FacilityTermsInput,
 } from "@/lib/portfolio-derive";
 import { emptyPortfolioSnapshot, type PortfolioSnapshot } from "@/lib/portfolio-shared";
 
@@ -25,6 +27,11 @@ export type {
   AllocationBasis,
   AllocationRow,
   BalanceRow,
+  BorrowingSummary,
+  FacilityBorrowing,
+  FacilityInterestPoint,
+  FacilityInterestVariance,
+  FacilityUseRow,
   OpenItem,
   OpenItemCounts,
   OpenItemKind,
@@ -98,6 +105,9 @@ async function loadPortfolioSnapshot(
   const repo = createJournalRepo(db);
   const journals = await repo.listPosted(householdId);
 
+  // UTC asOf — same date basis as price resolution and the ledger tables.
+  const asOf = new Date().toISOString().slice(0, 10);
+
   return derivePortfolioSnapshot({
     householdId,
     reportingCurrency,
@@ -105,7 +115,41 @@ async function loadPortfolioSnapshot(
     accounts,
     journals,
     prices: await resolveHeldPrices(db, householdId, journals),
+    facilityTerms: await loadFacilityTerms(db, householdId, asOf),
+    asOf,
   });
+}
+
+/**
+ * Effective facility terms + their benchmark curves for interest modelling.
+ *
+ * Persistence only — the read model refuses to invent a rate when a facility
+ * has no covering terms row or the curve has no point on/before asOf.
+ */
+async function loadFacilityTerms(
+  db: Db,
+  householdId: string,
+  asOf: string,
+): Promise<FacilityTermsInput[]> {
+  try {
+    const repo = createFacilityTermsRepo(db);
+    const records = await repo.listEffectiveTerms(householdId, asOf);
+    if (records.length === 0) return [];
+
+    const curves = await repo.listBenchmarkCurves(
+      records.map((record) => record.benchmarkId),
+    );
+
+    return records.map((record) => ({
+      terms: record.terms,
+      benchmarkCurve: curves.get(record.benchmarkId)?.points ?? [],
+    }));
+  } catch {
+    // A terms lookup failure must not fail the whole portfolio: the
+    // borrowing screen still shows actual balances and posted interest, and
+    // marks modelled figures unknown.
+    return [];
+  }
 }
 
 /**

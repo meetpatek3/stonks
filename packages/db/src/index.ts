@@ -6,4 +6,10 @@ export {
   type PriceRepo,
   type PriceOverrideInput,
 } from "./repos/price-repo";
+export {
+  createFacilityTermsRepo,
+  type FacilityTermsRepo,
+  type FacilityTermsRecord,
+  type BenchmarkCurve,
+} from "./repos/facility-terms-repo";
 export { eq, and, or, isNull, sql } from "drizzle-orm";

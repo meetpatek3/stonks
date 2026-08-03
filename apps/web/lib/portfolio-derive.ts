@@ -2,17 +2,26 @@ import {
   QUANTITY_SCALE,
   addCalendarDays,
   allocateExact,
+  actualInterestCharged,
   attributeInvestmentInterest,
+  FACILITY_USES,
+  interestVariance,
   isUnknownCost,
+  modelInterest,
   mulDivFloor,
   qtyFromDecimalString,
   qtyToDecimalString,
+  rateBpsOnDate,
   replay,
+  replayFacilitySlices,
   sortJournals,
   summarizeCanadaTaxYear,
   type Account,
   type AccountType,
+  type BenchmarkRatePoint,
   type CanadaTaxYearArgs,
+  type FacilityTerms,
+  type FacilityUse,
   type Journal,
   type LedgerState,
 } from "@stonks/ledger";
@@ -20,9 +29,15 @@ import { formatMoney } from "@/lib/format";
 import type { ResolvedPrice } from "@/lib/market/price-service";
 import {
   emptyBalancesByType,
+  emptyBorrowing,
   emptyPortfolioSnapshot,
   type AllocationRow,
   type BalanceRow,
+  type BorrowingSummary,
+  type FacilityBorrowing,
+  type FacilityInterestPoint,
+  type FacilityInterestVariance,
+  type FacilityUseRow,
   type OpenItem,
   type PortfolioSnapshot,
   type PositionRow,
@@ -88,6 +103,26 @@ export type DerivePortfolioInput = {
    * with the gap stated.
    */
   prices?: readonly ResolvedPrice[];
+  /**
+   * Facility terms + benchmark curves, one entry per facility that has them.
+   * A CREDIT_FACILITY account absent from this list still appears in
+   * `borrowing.facilities` with use slices and actual interest, but modelled
+   * interest, variance, and effective rate stay `null` with a stated reason.
+   */
+  facilityTerms?: readonly FacilityTermsInput[];
+  /**
+   * Cutoff date (`YYYY-MM-DD`) for YTD interest and the effective rate.
+   * Defaults to the latest posted journal's trade date, so the pure derivation
+   * does not depend on the wall clock. When there is no activity, YTD figures
+   * are zero and rate lookup is skipped.
+   */
+  asOf?: string;
+};
+
+/** Terms + the benchmark curve the facility is priced off. */
+export type FacilityTermsInput = {
+  terms: FacilityTerms;
+  benchmarkCurve: readonly BenchmarkRatePoint[];
 };
 
 /** Basis-point denominator: allocation shares always sum to this. */
@@ -242,6 +277,14 @@ export function derivePortfolioSnapshot(
       reportingCurrency,
       input.taxYear,
     ),
+    borrowing: deriveBorrowing({
+      accounts,
+      journals,
+      ledgerAccounts,
+      reportingCurrency,
+      facilityTerms: input.facilityTerms ?? [],
+      ...(input.asOf === undefined ? {} : { asOf: input.asOf }),
+    }),
   };
 }
 
@@ -1200,4 +1243,471 @@ function deriveTaxSummary(
 /** A journal's single posting currency (`assertJournalBalanced` enforces one). */
 function journalCurrency(journal: Journal): string | undefined {
   return journal.postings[0]?.amount.currency;
+}
+
+/**
+ * Borrowing-screen figures: outstanding balances, use slices, YTD actual
+ * interest, and modelled-vs-actual variance when terms + a benchmark curve
+ * are available.
+ *
+ * Modelled interest is always an estimate. Missing terms or curve never
+ * become a zero rate — the field stays `null` with a reason.
+ */
+function deriveBorrowing(args: {
+  accounts: readonly AccountMeta[];
+  journals: readonly Journal[];
+  ledgerAccounts: ReadonlyMap<string, Account>;
+  reportingCurrency: string;
+  facilityTerms: readonly FacilityTermsInput[];
+  asOf?: string;
+}): BorrowingSummary {
+  const facilitiesMeta = args.accounts.filter((a) => a.type === "CREDIT_FACILITY");
+  if (facilitiesMeta.length === 0) {
+    return emptyBorrowing();
+  }
+
+  const posted = sortJournals(args.journals);
+  const asOf =
+    args.asOf ??
+    posted[posted.length - 1]?.tradeDate ??
+    null;
+
+  const termsByFacility = new Map(
+    args.facilityTerms.map((entry) => [entry.terms.facilityAccountId, entry]),
+  );
+
+  const facilities: FacilityBorrowing[] = facilitiesMeta.map((meta) =>
+    deriveFacilityBorrowing({
+      meta,
+      journals: posted,
+      ledgerAccounts: args.ledgerAccounts,
+      termsInput: termsByFacility.get(meta.id),
+      asOf,
+    }),
+  );
+  facilities.sort((a, b) => a.accountName.localeCompare(b.accountName));
+
+  return aggregateBorrowing(facilities, args.reportingCurrency);
+}
+
+function deriveFacilityBorrowing(args: {
+  meta: AccountMeta;
+  journals: readonly Journal[];
+  ledgerAccounts: ReadonlyMap<string, Account>;
+  termsInput: FacilityTermsInput | undefined;
+  asOf: string | null;
+}): FacilityBorrowing {
+  const { meta, journals, ledgerAccounts, termsInput, asOf } = args;
+  const uncertaintyReasons: string[] = [];
+
+  const slices = replayFacilitySlices(journals, ledgerAccounts, meta.id);
+  const outstanding =
+    slices.facilityBalanceMinor < 0n ? -slices.facilityBalanceMinor : 0n;
+  const useBreakdown = useBreakdownFromSlices(slices.slices, outstanding);
+  const investmentOwed = slices.slices.INVESTMENT ?? 0n;
+  const investmentShareBps =
+    outstanding === 0n
+      ? null
+      : Number((investmentOwed * TOTAL_BPS) / outstanding);
+
+  // YTD window: calendar year of asOf, half-open [yearStart, asOf+1).
+  // Without asOf there is nothing to put a year end on — treat YTD interest
+  // as zero (no charged activity to window), not unknown.
+  let interestChargedYtdMinor = 0n;
+  let investmentInterestYtdMinor: bigint | null = 0n;
+  let periodStart: string | null = null;
+  let periodEnd: string | null = null;
+
+  if (asOf !== null) {
+    const year = Number(asOf.slice(0, 4));
+    periodStart = `${year}-01-01`;
+    periodEnd = addCalendarDays(asOf, 1);
+
+    const ytd = actualInterestYtd({
+      journals,
+      accounts: ledgerAccounts,
+      facilityAccountId: meta.id,
+      periodStart,
+      periodEnd,
+    });
+    interestChargedYtdMinor = ytd.actualPostedMinor;
+    investmentInterestYtdMinor = ytd.investmentMinor;
+    uncertaintyReasons.push(...ytd.uncertaintyReasons);
+  }
+
+  let effectiveRateBps: number | null = null;
+  let variance: FacilityInterestVariance | null = null;
+  let interestOverTime: FacilityInterestPoint[] = [];
+
+  if (asOf === null || periodStart === null || periodEnd === null) {
+    // No activity and no asOf — nothing to model.
+  } else if (termsInput === undefined) {
+    uncertaintyReasons.push(
+      `${meta.name}: no facility terms are on file, so the effective rate and ` +
+        `modelled interest cannot be derived.`,
+    );
+    interestOverTime = interestOverTimeFromActualOnly({
+      journals,
+      accounts: ledgerAccounts,
+      facilityAccountId: meta.id,
+      periodStart,
+      periodEnd,
+    });
+  } else if (termsInput.benchmarkCurve.length === 0) {
+    uncertaintyReasons.push(
+      `${meta.name}: facility terms name a benchmark but no rate points are ` +
+        `available, so the effective rate and modelled interest cannot be derived.`,
+    );
+    interestOverTime = interestOverTimeFromActualOnly({
+      journals,
+      accounts: ledgerAccounts,
+      facilityAccountId: meta.id,
+      periodStart,
+      periodEnd,
+    });
+  } else {
+    try {
+      effectiveRateBps =
+        rateBpsOnDate(termsInput.benchmarkCurve, asOf) + termsInput.terms.spreadBps;
+    } catch {
+      uncertaintyReasons.push(
+        `${meta.name}: no benchmark rate is effective on or before ${asOf}, so ` +
+          `the effective rate and modelled interest cannot be derived.`,
+      );
+      interestOverTime = interestOverTimeFromActualOnly({
+        journals,
+        accounts: ledgerAccounts,
+        facilityAccountId: meta.id,
+        periodStart,
+        periodEnd,
+      });
+      return {
+        accountId: meta.id,
+        accountName: meta.name,
+        currency: meta.currency,
+        minorUnits: meta.minorUnits,
+        outstandingMinor: outstanding.toString(),
+        useBreakdown,
+        investmentShareBps,
+        effectiveRateBps: null,
+        interestChargedYtdMinor: interestChargedYtdMinor.toString(),
+        investmentInterestYtdMinor:
+          investmentInterestYtdMinor === null
+            ? null
+            : investmentInterestYtdMinor.toString(),
+        variance: null,
+        interestOverTime,
+        uncertaintyReasons,
+      };
+    }
+
+    // periodEnd must be after periodStart for modelInterest; a household asOf
+    // on Jan 1 still models that one day via periodEnd = Jan 2.
+    if (periodEnd <= periodStart) {
+      uncertaintyReasons.push(
+        `${meta.name}: interest period is empty, so modelled interest cannot be derived.`,
+      );
+    } else {
+      const model = modelInterest({
+        journals,
+        accounts: ledgerAccounts,
+        terms: termsInput.terms,
+        benchmarkCurve: termsInput.benchmarkCurve,
+        periodStart,
+        periodEnd,
+      });
+      const result = interestVariance(model, journals, ledgerAccounts);
+      const modelledByUse: Partial<Record<FacilityUse, string>> = {};
+      for (const use of FACILITY_USES) {
+        const v = result.modelledByUse[use];
+        if (v !== undefined && v !== 0n) modelledByUse[use] = v.toString();
+      }
+      variance = {
+        periodStart: result.periodStart,
+        periodEnd: result.periodEnd,
+        modelledTotalMinor: result.modelledTotalMinor.toString(),
+        actualPostedMinor: result.actualPostedMinor.toString(),
+        varianceMinor: result.varianceMinor.toString(),
+        modelledByUse,
+        modelledIsEstimate: true,
+      };
+      interestOverTime = interestOverTimeFromModel(model.days, {
+        journals,
+        accounts: ledgerAccounts,
+        facilityAccountId: meta.id,
+        periodStart,
+        periodEnd,
+      });
+    }
+  }
+
+  return {
+    accountId: meta.id,
+    accountName: meta.name,
+    currency: meta.currency,
+    minorUnits: meta.minorUnits,
+    outstandingMinor: outstanding.toString(),
+    useBreakdown,
+    investmentShareBps,
+    effectiveRateBps,
+    interestChargedYtdMinor: interestChargedYtdMinor.toString(),
+    investmentInterestYtdMinor:
+      investmentInterestYtdMinor === null
+        ? null
+        : investmentInterestYtdMinor.toString(),
+    variance,
+    interestOverTime,
+    uncertaintyReasons,
+  };
+}
+
+function useBreakdownFromSlices(
+  slices: Partial<Record<FacilityUse, bigint>>,
+  outstanding: bigint,
+): FacilityUseRow[] {
+  const weights = FACILITY_USES.map((use) => slices[use] ?? 0n);
+  const bpsParts =
+    outstanding === 0n ? null : allocateExact(TOTAL_BPS, weights);
+
+  return FACILITY_USES.map((use, i) => ({
+    use,
+    owedMinor: (slices[use] ?? 0n).toString(),
+    bps: bpsParts === null ? null : Number(bpsParts[i]!),
+  }));
+}
+
+/**
+ * Actual interest charged on a facility in [periodStart, periodEnd), plus the
+ * INVESTMENT-attributed share when every charge carries use lines.
+ *
+ * Posted totals come from the ledger's `actualInterestCharged`. A charge with
+ * no facility-use attribution makes the investment share unknown (`null`)
+ * rather than a quiet understatement.
+ */
+function actualInterestYtd(args: {
+  journals: readonly Journal[];
+  accounts: ReadonlyMap<string, Account>;
+  facilityAccountId: string;
+  periodStart: string;
+  periodEnd: string;
+}): {
+  actualPostedMinor: bigint;
+  investmentMinor: bigint | null;
+  uncertaintyReasons: string[];
+} {
+  const { journals, accounts, facilityAccountId, periodStart, periodEnd } = args;
+  const { actualPostedMinor, actualJournalIds } = actualInterestCharged({
+    journals,
+    accounts,
+    facilityAccountId,
+    periodStart,
+    periodEnd,
+  });
+
+  let investmentMinor = 0n;
+  const uncertaintyReasons: string[] = [];
+  let investmentUnknown = false;
+  const counted = new Set(actualJournalIds);
+
+  for (const journal of journals) {
+    if (!counted.has(journal.id)) continue;
+
+    if (!journal.facilityUses || journal.facilityUses.length === 0) {
+      investmentUnknown = true;
+      uncertaintyReasons.push(
+        `${journal.id}: interest was charged with no facility-use attribution, so ` +
+          `how much of it financed investing is not derivable.`,
+      );
+      continue;
+    }
+    for (const line of journal.facilityUses) {
+      if (line.use === "INVESTMENT") investmentMinor += line.amount.minor;
+    }
+  }
+
+  return {
+    actualPostedMinor,
+    investmentMinor: investmentUnknown ? null : investmentMinor,
+    uncertaintyReasons,
+  };
+}
+
+function interestOverTimeFromModel(
+  days: readonly { date: string; interestTotalMinor: bigint }[],
+  actualArgs: {
+    journals: readonly Journal[];
+    accounts: ReadonlyMap<string, Account>;
+    facilityAccountId: string;
+    periodStart: string;
+    periodEnd: string;
+  },
+): FacilityInterestPoint[] {
+  const modelledByMonth = new Map<string, bigint>();
+  for (const day of days) {
+    const month = day.date.slice(0, 7);
+    modelledByMonth.set(
+      month,
+      (modelledByMonth.get(month) ?? 0n) + day.interestTotalMinor,
+    );
+  }
+  const actualByMonth = actualInterestByMonth(actualArgs);
+  const months = new Set([...modelledByMonth.keys(), ...actualByMonth.keys()]);
+  return [...months]
+    .sort()
+    .map((month) => ({
+      month,
+      modelledMinor: (modelledByMonth.get(month) ?? 0n).toString(),
+      modelledIsEstimate: true as const,
+      actualMinor: (actualByMonth.get(month) ?? 0n).toString(),
+    }));
+}
+
+function interestOverTimeFromActualOnly(args: {
+  journals: readonly Journal[];
+  accounts: ReadonlyMap<string, Account>;
+  facilityAccountId: string;
+  periodStart: string;
+  periodEnd: string;
+}): FacilityInterestPoint[] {
+  const actualByMonth = actualInterestByMonth(args);
+  return [...actualByMonth.keys()]
+    .sort()
+    .map((month) => ({
+      month,
+      modelledMinor: null,
+      modelledIsEstimate: true as const,
+      actualMinor: (actualByMonth.get(month) ?? 0n).toString(),
+    }));
+}
+
+function actualInterestByMonth(args: {
+  journals: readonly Journal[];
+  accounts: ReadonlyMap<string, Account>;
+  facilityAccountId: string;
+  periodStart: string;
+  periodEnd: string;
+}): Map<string, bigint> {
+  const byMonth = new Map<string, bigint>();
+  const { actualJournalIds } = actualInterestCharged({
+    journals: args.journals,
+    accounts: args.accounts,
+    facilityAccountId: args.facilityAccountId,
+    periodStart: args.periodStart,
+    periodEnd: args.periodEnd,
+  });
+  const counted = new Set(actualJournalIds);
+
+  for (const journal of args.journals) {
+    if (!counted.has(journal.id)) continue;
+
+    let facilityDelta = 0n;
+    for (const posting of journal.postings) {
+      if (posting.accountId === args.facilityAccountId) {
+        facilityDelta += posting.amount.minor;
+      }
+    }
+
+    let charged = 0n;
+    if (facilityDelta < 0n) {
+      charged = -facilityDelta;
+    } else {
+      for (const posting of journal.postings) {
+        if (posting.amount.minor > 0n) charged += posting.amount.minor;
+      }
+    }
+
+    const month = journal.tradeDate.slice(0, 7);
+    byMonth.set(month, (byMonth.get(month) ?? 0n) + charged);
+  }
+  return byMonth;
+}
+
+function aggregateBorrowing(
+  facilities: readonly FacilityBorrowing[],
+  reportingCurrency: string,
+): BorrowingSummary {
+  if (facilities.length === 0) return emptyBorrowing();
+
+  let outstanding = 0n;
+  let outstandingUncertain = false;
+  let interestYtd = 0n;
+  let interestYtdKnown = true;
+  let investmentOwed = 0n;
+  let totalOwedForShare = 0n;
+  const uncertaintyReasons: string[] = [];
+  const rates: { rate: number; weight: bigint }[] = [];
+  let rateBlocked = false;
+
+  for (const facility of facilities) {
+    uncertaintyReasons.push(...facility.uncertaintyReasons);
+
+    if (facility.currency !== reportingCurrency) {
+      outstandingUncertain = true;
+      // Omit from reporting-currency totals — same rule as sumTotals.
+      continue;
+    }
+
+    const owed = BigInt(facility.outstandingMinor);
+    outstanding += owed;
+    interestYtd += BigInt(facility.interestChargedYtdMinor);
+
+    const inv = facility.useBreakdown.find((u) => u.use === "INVESTMENT");
+    investmentOwed += BigInt(inv?.owedMinor ?? "0");
+    totalOwedForShare += owed;
+
+    if (owed > 0n) {
+      if (facility.effectiveRateBps === null) {
+        rateBlocked = true;
+      } else {
+        rates.push({ rate: facility.effectiveRateBps, weight: owed });
+      }
+    }
+
+    if (facility.investmentInterestYtdMinor === null) {
+      interestYtdKnown = true; // charged YTD itself is still known
+    }
+  }
+
+  let effectiveRateBps: number | null = null;
+  if (!rateBlocked && rates.length > 0) {
+    const weightSum = rates.reduce((s, r) => s + r.weight, 0n);
+    if (weightSum === 0n) {
+      effectiveRateBps = rates[0]!.rate;
+    } else {
+      // Integer weighted average, floor — bps are already integers.
+      let acc = 0n;
+      for (const r of rates) acc += BigInt(r.rate) * r.weight;
+      effectiveRateBps = Number(acc / weightSum);
+    }
+  } else if (rateBlocked) {
+    // Only mention once at the household level when a facility already named it.
+    if (
+      !uncertaintyReasons.some((r) =>
+        /effective rate and modelled interest cannot be derived/i.test(r),
+      )
+    ) {
+      uncertaintyReasons.push(
+        "At least one facility with an outstanding balance has no effective rate, " +
+          "so a household effective rate cannot be stated.",
+      );
+    }
+  } else if (facilities.length === 1) {
+    // Zero outstanding: still surface the single facility's rate when known.
+    effectiveRateBps = facilities[0]!.effectiveRateBps;
+  }
+
+  void interestYtdKnown;
+
+  return {
+    facilities: [...facilities],
+    outstandingMinor: outstanding.toString(),
+    outstandingIsUncertain: outstandingUncertain,
+    effectiveRateBps,
+    interestChargedYtdMinor: interestYtd.toString(),
+    investmentShareBps:
+      totalOwedForShare === 0n
+        ? null
+        : Number((investmentOwed * TOTAL_BPS) / totalOwedForShare),
+    uncertaintyReasons,
+  };
 }

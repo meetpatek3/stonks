@@ -1,4 +1,4 @@
-import type { AccountType, TaxFlag } from "@stonks/ledger";
+import type { AccountType, FacilityUse, TaxFlag } from "@stonks/ledger";
 import type { PriceSource } from "@/lib/market/price-service";
 
 export type { PriceSource };
@@ -143,14 +143,108 @@ export type ValuePoint = {
  * Data-quality findings the read model can derive from the ledger itself.
  *
  * The set is deliberately limited to kinds derivable from posted journals and
- * account metadata. Interest variance needs facility terms and a benchmark
- * rate curve, and statement reconciliation needs imported statements; neither
- * reaches the pure derivation, so neither is invented here.
+ * account metadata. Statement reconciliation needs imported statements and is
+ * not invented here. Interest variance is derived on `BorrowingSummary` when
+ * facility terms and a benchmark curve are supplied — it is not an open-item
+ * kind, because the borrowing screen owns that presentation.
  */
 export type OpenItemKind =
   | "UNKNOWN_COST_BASIS"
   | "ZERO_COST_BASIS"
   | "MISSING_FX_RATE";
+
+/** One use bucket of a credit facility's current owed balance. */
+export type FacilityUseRow = {
+  use: FacilityUse;
+  /** Owed amount attributed to this use, minor units of the facility currency. */
+  owedMinor: string;
+  /**
+   * Share of the facility's total owed, integer basis points.
+   * `null` when nothing is owed (no denominator), never a faked `0` share.
+   */
+  bps: number | null;
+};
+
+/**
+ * Modelled (estimated) vs posted interest for a facility over a period.
+ *
+ * `modelled*` figures come from `modelInterest` and are always estimates —
+ * `modelledIsEstimate` is `true` so a consumer cannot accidentally render them
+ * as fact. `actualPostedMinor` is what the ledger really charged.
+ */
+export type FacilityInterestVariance = {
+  periodStart: string;
+  periodEnd: string;
+  modelledTotalMinor: string;
+  actualPostedMinor: string;
+  /** modelled − actual, minor units. */
+  varianceMinor: string;
+  modelledByUse: Partial<Record<FacilityUse, string>>;
+  modelledIsEstimate: true;
+};
+
+/**
+ * One month of interest for the interest-over-time chart.
+ *
+ * `modelledMinor` is an estimate (or `null` when terms/curve are missing).
+ * `actualMinor` is the sum of posted `INTEREST_CHARGED` in that month — `"0"`
+ * when none were posted is a real zero, not a stand-in.
+ */
+export type FacilityInterestPoint = {
+  /** Calendar month, `YYYY-MM`. */
+  month: string;
+  modelledMinor: string | null;
+  modelledIsEstimate: true;
+  actualMinor: string;
+};
+
+/** One credit facility's borrowing picture, derived from replay (+ terms). */
+export type FacilityBorrowing = {
+  accountId: string;
+  accountName: string;
+  currency: string;
+  minorUnits: number;
+  /** Outstanding owed (positive), minor units of `currency`. */
+  outstandingMinor: string;
+  useBreakdown: FacilityUseRow[];
+  /** INVESTMENT slice / total owed, integer bps — `null` when owed is zero. */
+  investmentShareBps: number | null;
+  /**
+   * Benchmark + spread, annual rate in bps, as of the snapshot's `asOf`.
+   * `null` when terms or a usable benchmark point are missing.
+   */
+  effectiveRateBps: number | null;
+  /** Posted interest charged in the calendar year of `asOf`, minor units. */
+  interestChargedYtdMinor: string;
+  /**
+   * INVESTMENT-use share of YTD posted interest, from facility-use attribution.
+   * `null` when a charge in the year has no use attribution (unknown share).
+   */
+  investmentInterestYtdMinor: string | null;
+  /** YTD modelled vs actual. `null` when modelling inputs are incomplete. */
+  variance: FacilityInterestVariance | null;
+  interestOverTime: FacilityInterestPoint[];
+  /** Why a modelled/rate figure above is `null`. Incompleteness only. */
+  uncertaintyReasons: string[];
+};
+
+/**
+ * Household borrowing summary — the inputs for the borrowing screen.
+ *
+ * Household-level money fields are in the reporting currency and omit any
+ * facility whose currency cannot be converted (same rule as `totalBorrowedMinor`).
+ * `effectiveRateBps` is null when any facility that still has an outstanding
+ * balance cannot report a rate — an average of the rest would understate.
+ */
+export type BorrowingSummary = {
+  facilities: FacilityBorrowing[];
+  outstandingMinor: string;
+  outstandingIsUncertain: boolean;
+  effectiveRateBps: number | null;
+  interestChargedYtdMinor: string | null;
+  investmentShareBps: number | null;
+  uncertaintyReasons: string[];
+};
 
 export type OpenItemSeverity = "INFO" | "WARNING" | "ERROR";
 
@@ -318,6 +412,13 @@ export type PortfolioSnapshot = {
   openItemCounts: OpenItemCounts;
   /** `null` when there is no posted activity to summarize. */
   taxSummary: TaxSummary | null;
+  /**
+   * Credit-facility outstanding balances, use slices, YTD interest, and
+   * modelled-vs-actual variance. Always present (possibly with an empty
+   * `facilities` list) so the borrowing screen can distinguish "no facilities"
+   * from "snapshot failed to load".
+   */
+  borrowing: BorrowingSummary;
   message?: string | undefined;
 };
 
@@ -359,6 +460,19 @@ export function emptyValuation(): ValuationSummary {
   };
 }
 
+/** A borrowing summary with no credit facilities. */
+export function emptyBorrowing(): BorrowingSummary {
+  return {
+    facilities: [],
+    outstandingMinor: "0",
+    outstandingIsUncertain: false,
+    effectiveRateBps: null,
+    interestChargedYtdMinor: "0",
+    investmentShareBps: null,
+    uncertaintyReasons: [],
+  };
+}
+
 /** A snapshot with nothing derived yet — no data, rather than fake data. */
 export function emptyPortfolioSnapshot(
   fields: Pick<PortfolioSnapshot, "householdId" | "reportingCurrency" | "message"> = {},
@@ -387,6 +501,7 @@ export function emptyPortfolioSnapshot(
       total: 0,
     },
     taxSummary: null,
+    borrowing: emptyBorrowing(),
   };
 }
 
