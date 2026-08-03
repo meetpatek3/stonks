@@ -6,10 +6,13 @@ import { EmptyState } from "@heroui-pro/react/empty-state";
 import { Icon } from "@iconify/react";
 import {
   UNKNOWN,
+  bpsTrend,
   formatBps,
   formatMoney,
   formatQuantity,
   formatReportingMoney,
+  signedTrend,
+  type Trend,
 } from "@/lib/format";
 import {
   compareMinor,
@@ -123,7 +126,18 @@ export function PositionsScreen({ snapshot }: PositionsScreenProps) {
       </Card>
 
       {shared.length > 0 || qualified.length > 0 ? (
-        <QualifiedRows entries={qualified} shared={shared} />
+        <QualifiedRows
+          entries={qualified}
+          shared={shared}
+          // From the snapshot's own rows, never from `qualified`: a gap that
+          // blocks a figure on *every* holding — a fee in a foreign currency,
+          // interest with no use attribution — lifts into `shared` and empties
+          // those entries, so a flag derived from them would go false while
+          // every Fees and Net return cell in the grid reads N/A.
+          anyIncomplete={snapshot.positions.some(
+            (row) => positionQualifiers(row).isIncomplete,
+          )}
+        />
       ) : null}
 
       <MethodNote currency={currency} pricedAsOf={snapshot.valuation.pricedAsOf} />
@@ -351,7 +365,16 @@ function markLines(row: PositionRow, context: RenderContext): string[] {
     return ["No price — carried at cost"];
   }
 
-  const scale = row.priceMinorUnits ?? 2;
+  // The scale places the decimal point, so a guessed one states a different
+  // number rather than a badly-formatted one — the reason `formatReportingMoney`
+  // refuses to guess. Today `priceMinorUnits` is non-null whenever the price is,
+  // both coming from the same resolved mark, but this states the rule rather
+  // than relying on that.
+  const scale = row.priceMinorUnits;
+  if (scale === null) {
+    return [`Priced in ${row.priceCurrency}, whose minor-unit scale is not recorded`];
+  }
+
   // A quote is the ordinary case and needs no label; a manual mark is not, and
   // saying so is the difference between a market price and someone's opinion.
   const source = row.priceSource === "OVERRIDE" ? "manual mark · " : "";
@@ -386,7 +409,7 @@ function Money({
     return <Absent title={absentTitle} />;
   }
 
-  const tone = signed ? signTone(minor) : "text-foreground";
+  const tone = signed ? TREND_TONE[signedTrend(minor)] : "text-foreground";
   return (
     <Figure className={tone}>
       {formatReportingMoney(minor, context.currency, context.minorUnits)}
@@ -400,15 +423,19 @@ function Return({ bps, absentTitle }: { bps: number | null; absentTitle: string 
     return <Absent title={absentTitle} />;
   }
 
-  const tone = bps > 0 ? "text-success" : bps < 0 ? "text-danger" : "text-foreground";
-  return <Figure className={tone}>{formatBps(bps)}</Figure>;
+  return <Figure className={TREND_TONE[bpsTrend(bps)]}>{formatBps(bps)}</Figure>;
 }
 
-/** Sign of a minor-unit string, without converting it to a number. */
-function signTone(minor: string): string {
-  if (minor.startsWith("-")) return "text-danger";
-  return /[1-9]/.test(minor) ? "text-success" : "text-foreground";
-}
+/**
+ * Colour for a signed figure. The sign classification itself lives in
+ * `format.ts` (`signedTrend`), so a figure and the `TrendChip` beside it can
+ * never disagree about whether it is a gain.
+ */
+const TREND_TONE: Record<Trend, string> = {
+  up: "text-success",
+  down: "text-danger",
+  neutral: "text-foreground",
+};
 
 function Figure({
   className = "text-foreground",
@@ -420,11 +447,20 @@ function Figure({
   return <span className={`tabular-nums ${className}`}>{children}</span>;
 }
 
-/** The marker for a figure the read model would not derive. Never a `0`. */
+/**
+ * The marker for a figure the read model would not derive. Never a `0`.
+ *
+ * The reason is carried two ways, because a `title` alone is hover-only and so
+ * invisible on a touch screen and to most screen-reader flows: as the tooltip
+ * for a pointer, and as text in the accessible name. The same reason also
+ * appears verbatim under "What qualifies these figures" below the grid, which
+ * is the path that works with no pointer at all.
+ */
 function Absent({ title }: { title: string }) {
   return (
     <span className="tabular-nums text-muted" title={title}>
       {UNKNOWN}
+      <span className="sr-only"> — {title}</span>
     </span>
   );
 }
@@ -484,12 +520,14 @@ function MethodNote({
             figure net of every cost.
           </li>
           <li>
-            Fees charged on a credit facility are{" "}
-            <span className="text-foreground">not</span> counted as an
-            investment cost anywhere, here or on the overview: the ledger
-            records no use attribution for them, and the interest rule already
-            refuses to guess at investment use without one. Where such a fee
-            exists, every net figure understates the cost of the borrowing.
+            A fee charged on a credit facility{" "}
+            <span className="text-foreground">that names no holding</span> is not
+            counted as an investment cost anywhere, here or on the overview: the
+            ledger records no use attribution for it, and the interest rule
+            already refuses to guess at investment use without one. Where such a
+            fee exists, every net figure understates the cost of the borrowing.
+            A facility fee that does name a security is counted as a cost and is
+            not part of this gap.
           </li>
           <li>
             Both returns are{" "}
@@ -514,20 +552,23 @@ function MethodNote({
  *
  * `PositionRow.valuationUncertaintyReasons` mixes staleness and
  * incompleteness — a row marked at Friday's close is qualified even when the
- * portfolio total it feeds is whole — so the heading is built from the two
- * booleans and the reasons themselves are shown verbatim.
+ * portfolio total it feeds is whole — so the headings are built from the
+ * qualifier booleans and the reasons themselves are shown verbatim.
+ *
+ * `anyIncomplete` is passed in rather than derived from `entries`, because a
+ * gap that blocks a figure on every holding is lifted out of `entries` by
+ * `sharedUncertaintyReasons`; see the call site.
  */
 function QualifiedRows({
   entries,
   shared,
+  anyIncomplete,
 }: {
   entries: readonly { row: PositionRow; reasons: readonly string[] }[];
   shared: readonly string[];
+  /** True when any holding is missing a figure, whether or not it has an entry. */
+  anyIncomplete: boolean;
 }) {
-  const anyIncomplete = entries.some(
-    (entry) => positionQualifiers(entry.row).isIncomplete,
-  );
-
   return (
     <section className="flex min-w-0 flex-col gap-3">
       <h2 className="text-lg font-medium">What qualifies these figures</h2>

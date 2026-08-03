@@ -10,6 +10,7 @@ import Link from "next/link";
 import {
   DISPLAY_LOCALE,
   UNKNOWN,
+  bpsTrend,
   formatBps,
   formatMoney,
   formatReportingMoney,
@@ -341,13 +342,6 @@ function returnFooter(
     ? " · marked at prices older than today"
     : "";
   return `After ${interest} interest and ${fees} fees${asOf}`;
-}
-
-/** Basis points are a ratio, not money, so this is not `signedTrend`. */
-function bpsTrend(bps: number): "up" | "down" | "neutral" {
-  if (bps > 0) return "up";
-  if (bps < 0) return "down";
-  return "neutral";
 }
 
 /**

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  bpsTrend,
   formatBps,
   formatCompactNumber,
   formatMoney,
@@ -94,6 +95,22 @@ describe("signedTrend", () => {
 
   it("returns neutral for a zero minor value", () => {
     expect(signedTrend("0")).toBe("neutral");
+  });
+});
+
+describe("bpsTrend", () => {
+  it("classifies a gain, a loss and a flat return", () => {
+    expect(bpsTrend(1250)).toBe("up");
+    expect(bpsTrend(-1250)).toBe("down");
+    expect(bpsTrend(0)).toBe("neutral");
+  });
+
+  it("agrees with signedTrend on the same sign", () => {
+    // The two classify different kinds of value — a ratio and a money
+    // amount — but a gain must never read as a gain in one and not the other.
+    expect(bpsTrend(1)).toBe(signedTrend("1"));
+    expect(bpsTrend(-1)).toBe(signedTrend("-1"));
+    expect(bpsTrend(0)).toBe(signedTrend("0"));
   });
 });
 

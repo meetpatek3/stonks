@@ -140,6 +140,36 @@ describe("sharedUncertaintyReasons", () => {
   it("lifts nothing from an empty portfolio", () => {
     expect(sharedUncertaintyReasons([])).toEqual([]);
   });
+
+  it("lifts a wholesale block while every row stays incomplete", () => {
+    // A fee in a currency with no rate blocks feeCostMinor and netReturnBps on
+    // *every* holding and raises the same reason on each. Lifting the reason
+    // must not be read as the rows being whole: the screen's banner is built
+    // from the rows themselves for exactly this case.
+    const blocked =
+      "j-fee: the fee is in USD and no rate is available to state it in CAD, so it cannot be counted as a cost.";
+    const rows = [
+      row({
+        key: "a",
+        symbol: "XEQT",
+        feeCostMinor: null,
+        netReturnBps: null,
+        valuationUncertaintyReasons: [blocked],
+      }),
+      row({
+        key: "b",
+        symbol: "VFV",
+        feeCostMinor: null,
+        netReturnBps: null,
+        valuationUncertaintyReasons: [blocked],
+      }),
+    ];
+
+    expect(sharedUncertaintyReasons(rows)).toEqual([blocked]);
+    for (const candidate of rows) {
+      expect(positionQualifiers(candidate).isIncomplete).toBe(true);
+    }
+  });
 });
 
 describe("positionQualifiers", () => {

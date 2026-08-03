@@ -173,6 +173,18 @@ export function signedTrend(minor: string): Trend {
 }
 
 /**
+ * Classify a basis-point figure into a `TrendChip` trend.
+ *
+ * Separate from `signedTrend` because basis points are a ratio, not money: they
+ * arrive as a `number` from the read model, where a money value never may.
+ */
+export function bpsTrend(bps: number): Trend {
+  if (bps > 0) return "up";
+  if (bps < 0) return "down";
+  return "neutral";
+}
+
+/**
  * Render a possibly-absent/uncertain value. Returns the `UNKNOWN` marker
  * for `null`/`undefined` rather than falling back to `0` or a bare dash.
  */
