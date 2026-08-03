@@ -92,7 +92,10 @@ export type ValuePoint = {
  * rate curve, and statement reconciliation needs imported statements; neither
  * reaches the pure derivation, so neither is invented here.
  */
-export type OpenItemKind = "UNKNOWN_COST_BASIS" | "MISSING_FX_RATE";
+export type OpenItemKind =
+  | "UNKNOWN_COST_BASIS"
+  | "ZERO_COST_BASIS"
+  | "MISSING_FX_RATE";
 
 export type OpenItemSeverity = "INFO" | "WARNING" | "ERROR";
 
@@ -112,6 +115,7 @@ export type OpenItem = {
 export type OpenItemCounts = {
   unknownCost: number;
   missingFxRate: number;
+  zeroCostBasis: number;
   total: number;
 };
 
@@ -135,10 +139,12 @@ export type TaxSummary = {
   flags: TaxFlag[];
   disclaimer: string;
   /**
-   * True when an input to the year could not be derived — an interest charge
-   * with no use attribution, a realized gain with an unknown cost basis, or an
-   * amount in a currency with no rate. The figures then omit that input rather
-   * than guessing at it.
+   * True when the year's figures do not mean what they appear to — an input
+   * that could not be derived (an interest charge with no use attribution, a
+   * realized gain with an unknown cost basis, an amount in a currency with no
+   * rate), or a year outside the range the ledger covers at all, where the
+   * zeroes record an absence of data rather than an absence of activity. A
+   * quiet year *inside* the range is not uncertain: its zeroes are facts.
    */
   isUncertain: boolean;
   /** One human-readable reason per omission, naming the journal involved. */
@@ -226,7 +232,12 @@ export function emptyPortfolioSnapshot(
     allocationIsIncomplete: false,
     valueOverTime: [],
     openItems: [],
-    openItemCounts: { unknownCost: 0, missingFxRate: 0, total: 0 },
+    openItemCounts: {
+      unknownCost: 0,
+      missingFxRate: 0,
+      zeroCostBasis: 0,
+      total: 0,
+    },
     taxSummary: null,
   };
 }

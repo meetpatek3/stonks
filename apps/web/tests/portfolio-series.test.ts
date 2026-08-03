@@ -172,6 +172,74 @@ const interestEarned: Journal = {
   ],
 };
 
+/** A deposit two years later, so the ledger spans 2024 to 2026. */
+const laterDeposit: Journal = {
+  id: "j-deposit-2026",
+  type: "DEPOSIT",
+  tradeDate: "2026-03-01",
+  sortKey: 1,
+  status: "POSTED",
+  source: "MANUAL",
+  postings: [
+    { accountId: "chequing", amount: money("CAD", 10_000n) },
+    { accountId: "world", amount: money("CAD", -10_000n) },
+  ],
+};
+
+/**
+ * Sell the whole unknown-cost AAPL lot for 900.00.
+ *
+ * The ledger reports a gain of zero for a disposal it has no cost for. Taking
+ * that at face value would be wrong in the opposite direction to taking the
+ * proceeds as gain, so the year must exclude it and say why.
+ */
+const sellUnknownCostLot: Journal = {
+  id: "j-sell-aapl",
+  type: "SELL",
+  tradeDate: "2024-06-15",
+  sortKey: 1,
+  status: "POSTED",
+  source: "MANUAL",
+  postings: [
+    {
+      accountId: "brokerage",
+      amount: money("CAD", -90_000n),
+      quantity: qtyFromDecimalString("-10"),
+      securityId: "AAPL",
+      tradeCurrency: "CAD",
+      tradeAmountMinor: -90_000n,
+    },
+    { accountId: "chequing", amount: money("CAD", 90_000n) },
+  ],
+};
+
+/**
+ * A zero-cost acquisition: 5 units of SPINCO received for nothing.
+ *
+ * Unlike the AAPL opening lot, this cost is *known* — it is genuinely zero, as
+ * for a gift or a spinoff — so `costIsUnknown` stays false. It still carries no
+ * share of a cost allocation.
+ */
+const zeroCostSpinoff: Journal = {
+  id: "j-spinco",
+  type: "BUY",
+  tradeDate: "2024-02-01",
+  sortKey: 1,
+  status: "POSTED",
+  source: "MANUAL",
+  postings: [
+    {
+      accountId: "brokerage",
+      amount: money("CAD", 0n),
+      quantity: qtyFromDecimalString("5"),
+      securityId: "SPINCO",
+      tradeCurrency: "CAD",
+      tradeAmountMinor: 0n,
+    },
+    { accountId: "world", amount: money("CAD", 0n) },
+  ],
+};
+
 const BASE_JOURNALS: Journal[] = [
   openingUnknownCost,
   deposit,
@@ -249,6 +317,54 @@ describe("derivePortfolioSnapshot allocation", () => {
     expect(snap.allocation.map((row) => row.bps)).toEqual([3334, 3333, 3333]);
     expect(snap.allocation.reduce((sum, row) => sum + row.bps, 0)).toBe(10000);
     expect(snap.allocationIsIncomplete).toBe(false);
+  });
+
+  it("keeps each row's share aligned with its own cost", () => {
+    // Distinct costs 5.00 / 3.00 / 2.00 out of 10.00 divide exactly:
+    //   500 / 1000 = 50%   → 5000 bps
+    //   300 / 1000 = 30%   → 3000 bps
+    //   200 / 1000 = 20%   → 2000 bps
+    // Equal weights cannot catch a row/share mis-pairing; these can.
+    const costs: [string, bigint][] = [
+      ["AAA", 500n],
+      ["BBB", 300n],
+      ["CCC", 200n],
+    ];
+    const buys: Journal[] = costs.map(([securityId, cost], index) => ({
+      id: `j-buy-${securityId}`,
+      type: "BUY",
+      tradeDate: "2024-01-10",
+      sortKey: index,
+      status: "POSTED",
+      source: "MANUAL",
+      postings: [
+        {
+          accountId: "brokerage",
+          amount: money("CAD", cost),
+          quantity: qtyFromDecimalString("1"),
+          securityId,
+          tradeCurrency: "CAD",
+          tradeAmountMinor: cost,
+        },
+        { accountId: "chequing", amount: money("CAD", -cost) },
+      ],
+    }));
+
+    const snap = derivePortfolioSnapshot({
+      householdId: "hh-1",
+      reportingCurrency: "CAD",
+      accounts: ACCOUNTS,
+      journals: [deposit, ...buys],
+    });
+
+    expect(
+      snap.allocation.map((row) => [row.securityId, row.costReportingMinor, row.bps]),
+    ).toEqual([
+      ["AAA", "500", 5000],
+      ["BBB", "300", 3000],
+      ["CCC", "200", 2000],
+    ]);
+    expect(snap.allocation.reduce((sum, row) => sum + row.bps, 0)).toBe(10000);
   });
 
   it("returns no allocation at all when there is nothing to divide", () => {
@@ -388,6 +504,32 @@ describe("derivePortfolioSnapshot openItems", () => {
     expect(snap.openItemCounts.total).toBe(snap.openItems.length);
   });
 
+  it("names the zero-cost holding it dropped from the allocation", () => {
+    // A known cost of exactly zero is honest data, but it carries no share of
+    // a cost split. Saying only "incomplete" would leave the UI unable to name
+    // which holding is missing, so this exclusion is traceable like the rest.
+    const snap = derivePortfolioSnapshot({
+      householdId: "hh-1",
+      reportingCurrency: "CAD",
+      accounts: ACCOUNTS,
+      journals: [...BASE_JOURNALS, zeroCostSpinoff],
+    });
+
+    const spinco = snap.positions.find((p) => p.securityId === "SPINCO");
+    expect(spinco?.costIsUnknown).toBe(false);
+    expect(spinco?.costReportingMinor).toBe("0");
+
+    expect(snap.allocation.map((row) => row.securityId)).toEqual(["XEQT"]);
+    expect(snap.allocationIsIncomplete).toBe(true);
+
+    const items = snap.openItems.filter((item) => item.kind === "ZERO_COST_BASIS");
+    expect(items).toHaveLength(1);
+    expect(items[0]?.refType).toBe("POSITION");
+    expect(items[0]?.refId).toBe("brokerage:SPINCO");
+    expect(items[0]?.severity).toBe("INFO");
+    expect(snap.openItemCounts.zeroCostBasis).toBe(1);
+  });
+
   it("counts every open item, and reports none for a clean ledger", () => {
     const snap = snapshot();
 
@@ -404,6 +546,7 @@ describe("derivePortfolioSnapshot openItems", () => {
     expect(clean.openItemCounts).toEqual({
       unknownCost: 0,
       missingFxRate: 0,
+      zeroCostBasis: 0,
       total: 0,
     });
   });
@@ -435,14 +578,34 @@ describe("derivePortfolioSnapshot taxSummary", () => {
     expect(snapshot().taxSummary?.year).toBe(2024);
   });
 
-  it("reports a year with no activity as zeroes that are genuinely zero", () => {
-    const tax = snapshot(2023).taxSummary;
+  it("reports a quiet year inside the ledger's range as genuinely zero", () => {
+    // The ledger spans 2024 to 2026, so 2025 is covered and really was quiet:
+    // those zeroes are facts, and flagging them would cry wolf.
+    const tax = derivePortfolioSnapshot({
+      householdId: "hh-1",
+      reportingCurrency: "CAD",
+      accounts: ACCOUNTS,
+      journals: [...BASE_JOURNALS, laterDeposit],
+      taxYear: 2025,
+    }).taxSummary;
 
-    expect(tax?.year).toBe(2023);
+    expect(tax?.year).toBe(2025);
     expect(tax?.realizedGainsMinor).toBe("0");
     expect(tax?.dividendIncomeMinor).toBe("0");
     expect(tax?.taxableCapitalGainsMinor).toBe("0");
     expect(tax?.isUncertain).toBe(false);
+    expect(tax?.uncertaintyReasons).toEqual([]);
+  });
+
+  it("flags a year outside the ledger's range instead of reporting zeroes", () => {
+    // This ledger begins in 2024. "You had no gains in 2023" would be a claim
+    // about the household; the truth is only that the ledger says nothing.
+    const tax = snapshot(2023).taxSummary;
+
+    expect(tax?.year).toBe(2023);
+    expect(tax?.isUncertain).toBe(true);
+    expect(tax?.uncertaintyReasons.join(" ")).toContain("2024");
+    expect(tax?.uncertaintyReasons.join(" ")).toContain("2023");
   });
 
   it("marks the summary uncertain rather than fabricating a figure", () => {
@@ -473,6 +636,27 @@ describe("derivePortfolioSnapshot taxSummary", () => {
     expect(tax?.uncertaintyReasons.join(" ")).toContain("j-interest-paid-cash");
     // The un-attributable 800 must not silently join the deductible figure.
     expect(tax?.deductibleInterestExpenseMinor).toBe("1000");
+  });
+
+  it("excludes a disposal whose cost basis is unknown, rather than counting it", () => {
+    const tax = derivePortfolioSnapshot({
+      householdId: "hh-1",
+      reportingCurrency: "CAD",
+      accounts: ACCOUNTS,
+      journals: [...BASE_JOURNALS, sellUnknownCostLot],
+      taxYear: 2024,
+    }).taxSummary;
+
+    // The XEQT sale still contributes its 40,000. The AAPL sale contributes
+    // nothing: neither its 90,000 proceeds (which would be the gain only if
+    // the cost were truly zero) nor the ledger's placeholder gain of zero
+    // (which would read as "sold at exactly break-even").
+    expect(tax?.realizedGainsMinor).toBe("40000");
+    expect(tax?.taxableCapitalGainsMinor).toBe("20000");
+    expect(tax?.isUncertain).toBe(true);
+    const reasons = tax?.uncertaintyReasons.join(" ") ?? "";
+    expect(reasons).toContain("j-sell-aapl");
+    expect(reasons).toContain("AAPL");
   });
 
   it("has no tax summary when there is no ledger activity to summarize", () => {

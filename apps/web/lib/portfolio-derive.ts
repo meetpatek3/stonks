@@ -130,14 +130,16 @@ export function derivePortfolioSnapshot(
   }
   positions.sort((a, b) => a.key.localeCompare(b.key));
 
-  const { allocation, allocationIsIncomplete } = deriveAllocation(positions);
-  const openItems = deriveOpenItems(positions, totals.unconvertible, metaById);
-  const unknownCost = openItems.filter(
-    (item) => item.kind === "UNKNOWN_COST_BASIS",
-  ).length;
-  const missingFxRate = openItems.filter(
-    (item) => item.kind === "MISSING_FX_RATE",
-  ).length;
+  const { allocation, allocationIsIncomplete, zeroCost } =
+    deriveAllocation(positions);
+  const openItems = deriveOpenItems(
+    positions,
+    zeroCost,
+    totals.unconvertible,
+    metaById,
+  );
+  const countOf = (kind: OpenItem["kind"]) =>
+    openItems.filter((item) => item.kind === kind).length;
 
   return {
     householdId,
@@ -160,7 +162,12 @@ export function derivePortfolioSnapshot(
       reportingCurrency,
     ),
     openItems,
-    openItemCounts: { unknownCost, missingFxRate, total: openItems.length },
+    openItemCounts: {
+      unknownCost: countOf("UNKNOWN_COST_BASIS"),
+      missingFxRate: countOf("MISSING_FX_RATE"),
+      zeroCostBasis: countOf("ZERO_COST_BASIS"),
+      total: openItems.length,
+    },
     taxSummary: deriveTaxSummary(
       state,
       journals,
@@ -242,15 +249,20 @@ function sumTotals(
  * honestly. `allocateExact` distributes the rounding remainder (Hamilton
  * largest remainder), so the parts sum exactly instead of drifting.
  *
- * A position with an unknown cost basis carries no honest weight and is
- * omitted; the caller learns that from `allocationIsIncomplete` rather than
- * from a fabricated zero share.
+ * Two kinds of position carry no honest weight and are omitted: one whose cost
+ * is unknown, and one whose cost is known to be zero (a gift or a zero-basis
+ * spinoff). Both set `allocationIsIncomplete`, and both are returned so the
+ * caller can raise a *traceable* open item naming the holding rather than
+ * leaving the UI with only a boolean.
  */
 function deriveAllocation(positions: readonly PositionRow[]): {
   allocation: AllocationRow[];
   allocationIsIncomplete: boolean;
+  /** Positions with a known but non-positive cost, excluded from the split. */
+  zeroCost: PositionRow[];
 } {
   const weighted: { position: PositionRow; cost: bigint }[] = [];
+  const zeroCost: PositionRow[] = [];
   let omitted = false;
 
   for (const position of positions) {
@@ -263,6 +275,7 @@ function deriveAllocation(positions: readonly PositionRow[]): {
       // A zero or negative pooled cost has no share of a positive whole, and
       // allocateExact rejects such a weight outright.
       omitted = true;
+      zeroCost.push(position);
       continue;
     }
     weighted.push({ position, cost });
@@ -271,7 +284,7 @@ function deriveAllocation(positions: readonly PositionRow[]): {
   if (weighted.length === 0) {
     // Nothing to divide. With no positions at all this is not "incomplete" —
     // there is simply nothing to show.
-    return { allocation: [], allocationIsIncomplete: omitted };
+    return { allocation: [], allocationIsIncomplete: omitted, zeroCost };
   }
 
   const parts = allocateExact(
@@ -290,7 +303,7 @@ function deriveAllocation(positions: readonly PositionRow[]): {
     bps: Number(parts[index]),
   }));
 
-  return { allocation, allocationIsIncomplete: omitted };
+  return { allocation, allocationIsIncomplete: omitted, zeroCost };
 }
 
 /**
@@ -361,6 +374,7 @@ function nextMonth(month: string): string {
  */
 function deriveOpenItems(
   positions: readonly PositionRow[],
+  zeroCostPositions: readonly PositionRow[],
   unconvertibleAccountIds: readonly string[],
   metaById: ReadonlyMap<string, AccountMeta>,
 ): OpenItem[] {
@@ -374,6 +388,21 @@ function deriveOpenItems(
       message:
         `No cost basis recorded for ${position.symbol}. Gains on a sale cannot ` +
         `be computed until an opening cost is entered.`,
+      refType: "POSITION",
+      refId: position.key,
+    });
+  }
+
+  for (const position of zeroCostPositions) {
+    // Not a data error — a gift or zero-basis spinoff really does cost
+    // nothing. It is INFO because the only consequence is that the holding
+    // carries no share of a cost-based split, which is worth naming.
+    items.push({
+      kind: "ZERO_COST_BASIS",
+      severity: "INFO",
+      message:
+        `${position.symbol} has a recorded cost of zero, so it carries no share ` +
+        `of the cost allocation even though the holding is real.`,
       refType: "POSITION",
       refId: position.key,
     });
@@ -414,15 +443,30 @@ function deriveTaxSummary(
   requestedYear: number | undefined,
 ): TaxSummary | null {
   const posted = sortJournals(journals);
+  const first = posted[0];
   const last = posted[posted.length - 1];
-  if (!last) {
+  if (!first || !last) {
     return null;
   }
 
-  const year = requestedYear ?? Number(last.tradeDate.slice(0, 4));
+  const firstYear = Number(first.tradeDate.slice(0, 4));
+  const lastYear = Number(last.tradeDate.slice(0, 4));
+  const year = requestedYear ?? lastYear;
   const prefix = `${year}-`;
   const byId = new Map(posted.map((journal) => [journal.id, journal]));
   const uncertaintyReasons: string[] = [];
+
+  if (year < firstYear || year > lastYear) {
+    // Outside the years the ledger covers, every figure below is zero purely
+    // because there is nothing to read. Reported flat, that would assert the
+    // household had no gains and no income that year, which this ledger is in
+    // no position to claim. A quiet year *inside* the range is different: its
+    // zeroes are facts, and are left unflagged.
+    uncertaintyReasons.push(
+      `${year} is outside the years this ledger covers (${firstYear} to ${lastYear}). ` +
+        `These figures reflect an absence of records, not an absence of activity.`,
+    );
+  }
 
   const realizedGains: CanadaTaxYearArgs["realizedGains"] = [];
   for (const gain of state.realized) {
