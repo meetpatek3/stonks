@@ -12,4 +12,12 @@ export {
   type FacilityTermsRecord,
   type BenchmarkCurve,
 } from "./repos/facility-terms-repo";
+export {
+  createTokenRepo,
+  generateToken,
+  hashToken,
+  type TokenRepo,
+  type VerifiedToken,
+  type ApiTokenSummary,
+} from "./repos/token-repo";
 export { eq, and, or, isNull, sql } from "drizzle-orm";
