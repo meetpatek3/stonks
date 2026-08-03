@@ -16,6 +16,10 @@ import { createQuoteFetcher } from "@/lib/market/provider";
 import { createPriceService, type ResolvedPrice } from "@/lib/market/price-service";
 import { loadSecurityRefs } from "@/lib/market/symbols";
 import {
+  mostRecentlyUsedAccountId,
+  todayIsoDate,
+} from "@/lib/journals";
+import {
   toJournalRows,
   type AccountRef,
   type JournalRow,
@@ -309,4 +313,119 @@ export async function loadSessionJournalRows(): Promise<{
 
   const journals = await createJournalRepo(db).listAll(householdId);
   return { rows: toJournalRows(journals, accounts), accounts };
+}
+
+/**
+ * Accounts + defaults for the fast-entry form. Open accounts only; the MRU
+ * pick is the latest non-EXTERNAL account touched by a POSTED journal.
+ */
+export async function loadEntryFormData(): Promise<{
+  accounts: AccountRef[];
+  reportingCurrency: string;
+  minorUnits: number;
+  mruAccountId: string | null;
+  defaultTradeDate: string;
+  message?: string;
+}> {
+  const db = getDb();
+  if (!db) {
+    return {
+      accounts: [],
+      reportingCurrency: "CAD",
+      minorUnits: 2,
+      mruAccountId: null,
+      defaultTradeDate: todayIsoDate(),
+      message: "DATABASE_URL not configured",
+    };
+  }
+
+  const session = await getSession();
+  if (!session) {
+    return {
+      accounts: [],
+      reportingCurrency: "CAD",
+      minorUnits: 2,
+      mruAccountId: null,
+      defaultTradeDate: todayIsoDate(),
+      message: "not authenticated",
+    };
+  }
+
+  const householdId = session.householdId;
+
+  const householdRow = await db
+    .select()
+    .from(household)
+    .where(eq(household.id, householdId))
+    .limit(1)
+    .then((rows) => rows[0]);
+
+  if (!householdRow) {
+    return {
+      accounts: [],
+      reportingCurrency: "CAD",
+      minorUnits: 2,
+      mruAccountId: null,
+      defaultTradeDate: todayIsoDate(),
+      message: "household not found",
+    };
+  }
+
+  const reportingCurrency = householdRow.reportingCurrency;
+
+  const [currencyRow] = await db
+    .select({ minorUnits: currency.minorUnits })
+    .from(currency)
+    .where(eq(currency.code, reportingCurrency))
+    .limit(1);
+
+  const minorUnits = currencyRow?.minorUnits ?? 2;
+
+  const accountRows = await db
+    .select({
+      id: account.id,
+      name: account.name,
+      type: account.type,
+      currency: account.currency,
+      minorUnits: currency.minorUnits,
+      closedAt: account.closedAt,
+    })
+    .from(account)
+    .innerJoin(currency, eq(account.currency, currency.code))
+    .where(eq(account.householdId, householdId));
+
+  const accounts: AccountRef[] = accountRows
+    .filter((row) => row.closedAt === null)
+    .map((row) => ({
+      id: row.id,
+      name: row.name,
+      type: row.type,
+      currency: row.currency,
+      minorUnits: row.minorUnits,
+    }));
+
+  if (accounts.length === 0) {
+    return {
+      accounts,
+      reportingCurrency,
+      minorUnits,
+      mruAccountId: null,
+      defaultTradeDate: todayIsoDate(),
+      message: "no accounts",
+    };
+  }
+
+  const journals = await createJournalRepo(db).listPosted(householdId);
+  const selectable = new Set(
+    accounts.filter((a) => a.type !== "EXTERNAL").map((a) => a.id),
+  );
+  const mruAccountId = mostRecentlyUsedAccountId(journals, selectable);
+
+  return {
+    accounts,
+    reportingCurrency,
+    minorUnits,
+    mruAccountId,
+    defaultTradeDate: todayIsoDate(),
+  };
 }
