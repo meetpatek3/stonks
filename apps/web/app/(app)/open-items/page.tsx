@@ -1,5 +1,8 @@
-import { RebuildingPlaceholder } from "@/components/rebuilding-placeholder";
+import { OpenItemsScreen } from "@/components/open-items-screen";
+import { loadSessionSnapshot } from "@/lib/portfolio";
 
-export default function OpenItemsPage() {
-  return <RebuildingPlaceholder screen="Open items" />;
+export const dynamic = "force-dynamic";
+
+export default async function OpenItemsPage() {
+  return <OpenItemsScreen snapshot={await loadSessionSnapshot()} />;
 }

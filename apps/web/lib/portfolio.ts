@@ -61,6 +61,7 @@ export { formatMoney } from "@/lib/portfolio-shared";
 async function loadPortfolioSnapshot(
   db: Db,
   householdId: string,
+  taxYear?: number,
 ): Promise<PortfolioSnapshot> {
   const householdRow = await db
     .select()
@@ -122,6 +123,7 @@ async function loadPortfolioSnapshot(
     prices: await resolveHeldPrices(db, householdId, journals),
     facilityTerms: await loadFacilityTerms(db, householdId, asOf),
     asOf,
+    ...(taxYear === undefined ? {} : { taxYear }),
   });
 }
 
@@ -221,7 +223,10 @@ export const getPortfolioSnapshot = cache(loadPortfolioSnapshot);
  * (a missing database is reported before a missing session, because it is the
  * more fundamental one) cannot drift between routes.
  */
-export async function loadSessionSnapshot(): Promise<PortfolioSnapshot> {
+export async function loadSessionSnapshot(options?: {
+  /** Overrides the default tax year (year of the most recent posted journal). */
+  taxYear?: number;
+}): Promise<PortfolioSnapshot> {
   const db = getDb();
   if (!db) {
     return emptyPortfolioSnapshot({ message: "DATABASE_URL not configured" });
@@ -232,6 +237,9 @@ export async function loadSessionSnapshot(): Promise<PortfolioSnapshot> {
     return emptyPortfolioSnapshot({ message: "not authenticated" });
   }
 
+  if (options?.taxYear !== undefined) {
+    return getPortfolioSnapshot(db, session.householdId, options.taxYear);
+  }
   return getPortfolioSnapshot(db, session.householdId);
 }
 
