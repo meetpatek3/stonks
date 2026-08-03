@@ -63,7 +63,6 @@ type PriceServiceRepo = Pick<PriceRepo, "listOverrides" | "upsertQuotes" | "late
 export type PriceServiceOptions = {
   repo: PriceServiceRepo;
   fetcher: QuoteFetcher;
-  now?: () => Date;
 };
 
 export type ResolvePricesArgs = {
@@ -117,29 +116,33 @@ async function refreshQuotes(args: {
 }): Promise<void> {
   const { repo, fetcher, securities, overrides, asOf } = args;
 
-  const requests: QuoteRequest[] = [];
-  for (const security of securities) {
+  const candidates = securities.filter((security) => {
     // An override for the date wins outright, so fetching would spend a request
     // on a price that can never be used.
-    if (overrides.some((o) => o.securityId === security.id && o.asOf === asOf)) continue;
+    if (overrides.some((o) => o.securityId === security.id && o.asOf === asOf)) return false;
     // No symbol on that date means nothing to ask an external API for.
-    if (!security.symbol) continue;
-    // A quote for the exact date is already the answer; the repo is the cache.
-    const cached = await safely(
-      () => repo.latestQuoteAsOf(security.id, security.currency, asOf),
-      null,
-    );
-    if (cached?.asOf === asOf) continue;
+    return security.symbol !== null && security.symbol !== "";
+  });
 
-    requests.push({
+  // A quote for the exact date is already the answer; the repo is the cache.
+  // These lookups are issued together: serialized round trips would put N
+  // sequential queries on a render path before any fetch could start.
+  const cached = await Promise.all(
+    candidates.map((security) =>
+      safely(() => repo.latestQuoteAsOf(security.id, security.currency, asOf), null),
+    ),
+  );
+
+  const requests: QuoteRequest[] = candidates
+    .filter((_, i) => cached[i]?.asOf !== asOf)
+    .map((security) => ({
       securityId: security.id as SecurityId,
-      symbol: security.symbol,
+      symbol: security.symbol!,
       exchange: security.exchange,
       currency: security.currency,
       minorUnits: security.minorUnits,
       asOf,
-    });
-  }
+    }));
 
   if (requests.length === 0) return;
 

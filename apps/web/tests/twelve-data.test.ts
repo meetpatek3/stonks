@@ -189,6 +189,40 @@ describe("createTwelveDataFetcher", () => {
     expect(quotes.map((q) => q.securityId)).toEqual(["sec-msft"]);
   });
 
+  it("splits a group larger than the batch cap into whole requests, losing no symbol", async () => {
+    const symbols = ["S1", "S2", "S3", "S4", "S5", "S6", "S7", "S8", "S9"];
+    const { impl, calls } = fakeFetch([
+      Object.fromEntries(
+        symbols.map((s) => [s, okSeries([{ datetime: "2026-08-01", close: "1.00" }])]),
+      ),
+    ]);
+    const fetcher = createTwelveDataFetcher({ apiKey: "KEY", fetchImpl: impl });
+
+    const quotes = await fetcher.fetchQuotes(
+      symbols.map((s) => request({ securityId: `sec-${s}`, symbol: s })),
+    );
+
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toContain("symbol=S1%2CS2%2CS3%2CS4%2CS5%2CS6%2CS7%2CS8");
+    expect(calls[1]).toContain("symbol=S9");
+    expect(quotes.map((q) => q.securityId)).toEqual(symbols.map((s) => `sec-${s}`));
+  });
+
+  it("matches a response key against a request symbol that carries an exchange suffix", async () => {
+    const { impl } = fakeFetch([
+      { AAPL: okSeries([{ datetime: "2026-08-01", close: "3.00" }]) },
+      { AAPL: okSeries([{ datetime: "2026-08-01", close: "3.00" }]) },
+    ]);
+    const fetcher = createTwelveDataFetcher({ apiKey: "KEY", fetchImpl: impl });
+
+    const quotes = await fetcher.fetchQuotes([
+      request({ symbol: "AAPL:NASDAQ" }),
+      request({ securityId: "sec-msft", symbol: "MSFT" }),
+    ]);
+
+    expect(quotes.map((q) => [q.securityId, q.priceMinor])).toEqual([["sec-aapl", 300n]]);
+  });
+
   it("makes no request at all for an empty batch", async () => {
     const { impl, calls } = fakeFetch([okSeries([])]);
     const fetcher = createTwelveDataFetcher({ apiKey: "KEY", fetchImpl: impl });

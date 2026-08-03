@@ -148,7 +148,12 @@ function findSeries(body: Record<string, unknown>, symbol: string): Record<strin
 
 function matchesSymbol(symbol: string, candidate: string | undefined): boolean {
   if (candidate === undefined) return false;
-  return candidate.split(":")[0]!.toUpperCase() === symbol.toUpperCase();
+  // Normalise both sides: a stored symbol may itself carry an exchange suffix.
+  return bareSymbol(candidate) === bareSymbol(symbol);
+}
+
+function bareSymbol(symbol: string): string {
+  return symbol.split(":")[0]!.trim().toUpperCase();
 }
 
 function seriesSymbol(series: Record<string, unknown>): string | undefined {

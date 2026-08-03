@@ -80,7 +80,7 @@ describe("createPriceService", () => {
   it("returns a quote for the requested date as source QUOTE, not stale", async () => {
     const { repo } = fakeRepo();
     const fetcher = fakeFetcher([quote()]);
-    const service = createPriceService({ repo, fetcher, now: () => new Date(NOW) });
+    const service = createPriceService({ repo, fetcher });
 
     const results = await service.resolvePrices({
       householdId: "hh-1",
@@ -227,6 +227,48 @@ describe("createPriceService", () => {
     });
 
     expect(fetcher.batches.flat()).toHaveLength(1);
+  });
+
+  it("issues the pre-fetch cache lookups together, not one round trip after another", async () => {
+    const { repo } = fakeRepo();
+    let inFlight = 0;
+    let peak = 0;
+    const slowRepo = {
+      ...repo,
+      async latestQuoteAsOf(securityId: string, currency: string, asOf: string) {
+        inFlight += 1;
+        peak = Math.max(peak, inFlight);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        inFlight -= 1;
+        return repo.latestQuoteAsOf(securityId, currency, asOf);
+      },
+    };
+    // Snapshot at fetch time, so this measures the pre-fetch phase only — the
+    // per-security lookups inside resolvePrice run later and are already parallel.
+    let peakBeforeFetch = 0;
+    const service = createPriceService({
+      repo: slowRepo,
+      fetcher: {
+        name: "peak-recording",
+        async fetchQuotes() {
+          peakBeforeFetch = peak;
+          return [];
+        },
+      },
+    });
+
+    await service.resolvePrices({
+      householdId: "hh-1",
+      securities: [
+        security(),
+        security({ id: "sec-msft", symbol: "MSFT" }),
+        security({ id: "sec-xiu", symbol: "XIU" }),
+      ],
+      asOf: "2026-08-01",
+    });
+
+    // Serialized lookups would never overlap: peak concurrency would be 1.
+    expect(peakBeforeFetch).toBe(3);
   });
 
   it("deduplicates by (securityId, currency, asOf) before persisting, last write winning", async () => {
