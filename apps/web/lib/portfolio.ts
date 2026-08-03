@@ -16,6 +16,11 @@ import { createQuoteFetcher } from "@/lib/market/provider";
 import { createPriceService, type ResolvedPrice } from "@/lib/market/price-service";
 import { loadSecurityRefs } from "@/lib/market/symbols";
 import {
+  toJournalRows,
+  type AccountRef,
+  type JournalRow,
+} from "@/lib/ledger-table";
+import {
   derivePortfolioSnapshot,
   heldSecurityIds,
   type AccountMeta,
@@ -228,4 +233,72 @@ export async function loadSessionSnapshot(): Promise<PortfolioSnapshot> {
   }
 
   return getPortfolioSnapshot(db, session.householdId);
+}
+
+/**
+ * Every journal for the current household, including `SUPERSEDED`, projected
+ * into serialisable grid rows.
+ *
+ * Kept separate from `loadSessionSnapshot` on purpose: replay and the read
+ * model see only `POSTED` journals. The ledger screen is the one place that
+ * needs the audit history, so it pays for `listAll` rather than making every
+ * page load it.
+ *
+ * Failure modes match the snapshot helper so the screen's EmptyState can
+ * reuse the same `message` strings.
+ */
+export async function loadSessionJournalRows(): Promise<{
+  rows: JournalRow[];
+  accounts: AccountRef[];
+  message?: string;
+}> {
+  const db = getDb();
+  if (!db) {
+    return { rows: [], accounts: [], message: "DATABASE_URL not configured" };
+  }
+
+  const session = await getSession();
+  if (!session) {
+    return { rows: [], accounts: [], message: "not authenticated" };
+  }
+
+  const householdId = session.householdId;
+
+  const householdRow = await db
+    .select()
+    .from(household)
+    .where(eq(household.id, householdId))
+    .limit(1)
+    .then((rows) => rows[0]);
+
+  if (!householdRow) {
+    return { rows: [], accounts: [], message: "household not found" };
+  }
+
+  const accountRows = await db
+    .select({
+      id: account.id,
+      name: account.name,
+      type: account.type,
+      currency: account.currency,
+      minorUnits: currency.minorUnits,
+    })
+    .from(account)
+    .innerJoin(currency, eq(account.currency, currency.code))
+    .where(eq(account.householdId, householdId));
+
+  const accounts: AccountRef[] = accountRows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    type: row.type,
+    currency: row.currency,
+    minorUnits: row.minorUnits,
+  }));
+
+  if (accounts.length === 0) {
+    return { rows: [], accounts, message: "no accounts" };
+  }
+
+  const journals = await createJournalRepo(db).listAll(householdId);
+  return { rows: toJournalRows(journals, accounts), accounts };
 }

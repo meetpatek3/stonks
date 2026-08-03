@@ -11,7 +11,17 @@ import {
 
 export interface JournalRepo {
   insertPosted(journal: Journal, householdId: string): Promise<void>;
+  /** Posted journals only — the input set for replay and the read model. */
   listPosted(householdId: string): Promise<Journal[]>;
+  /**
+   * Every journal for the household, including `SUPERSEDED`.
+   *
+   * Corrections use supersession rather than mutation; the audit history
+   * (and the UI that shows it) needs the superseded row plus its
+   * `supersedesJournalId` link. Replay must keep calling `listPosted` —
+   * this method must never feed `replay()`.
+   */
+  listAll(householdId: string): Promise<Journal[]>;
 }
 
 export function createJournalRepo(db: Db): JournalRepo {
@@ -64,61 +74,77 @@ export function createJournalRepo(db: Db): JournalRepo {
     },
 
     async listPosted(householdId) {
-      const journalRows = await db
-        .select()
-        .from(journal)
-        .where(and(eq(journal.householdId, householdId), eq(journal.status, "POSTED")));
+      return listJournals(db, householdId, "POSTED");
+    },
 
-      if (journalRows.length === 0) {
-        return [];
-      }
-
-      const [householdRow] = await db
-        .select({ reportingCurrency: household.reportingCurrency })
-        .from(household)
-        .where(eq(household.id, householdId))
-        .limit(1);
-
-      if (!householdRow) {
-        throw new Error(`Household not found: ${householdId}`);
-      }
-
-      const journalIds = journalRows.map((row) => row.id);
-
-      const postingRows = await db
-        .select()
-        .from(posting)
-        .where(inArray(posting.journalId, journalIds));
-
-      const facilityRows = await db
-        .select()
-        .from(journalFacilityUse)
-        .where(inArray(journalFacilityUse.journalId, journalIds));
-
-      const postingsByJournal = new Map<string, Array<typeof posting.$inferSelect>>();
-      for (const row of postingRows) {
-        const list = postingsByJournal.get(row.journalId) ?? [];
-        list.push(row);
-        postingsByJournal.set(row.journalId, list);
-      }
-
-      const facilityByJournal = new Map<string, Array<typeof journalFacilityUse.$inferSelect>>();
-      for (const row of facilityRows) {
-        const list = facilityByJournal.get(row.journalId) ?? [];
-        list.push(row);
-        facilityByJournal.set(row.journalId, list);
-      }
-
-      return journalRows.map((row) =>
-        toDomainJournal(
-          row,
-          postingsByJournal.get(row.id) ?? [],
-          facilityByJournal.get(row.id) ?? [],
-          householdRow.reportingCurrency,
-        ),
-      );
+    async listAll(householdId) {
+      return listJournals(db, householdId, "ALL");
     },
   };
+}
+
+async function listJournals(
+  db: Db,
+  householdId: string,
+  scope: "POSTED" | "ALL",
+): Promise<Journal[]> {
+  const journalRows = await db
+    .select()
+    .from(journal)
+    .where(
+      scope === "POSTED"
+        ? and(eq(journal.householdId, householdId), eq(journal.status, "POSTED"))
+        : eq(journal.householdId, householdId),
+    );
+
+  if (journalRows.length === 0) {
+    return [];
+  }
+
+  const [householdRow] = await db
+    .select({ reportingCurrency: household.reportingCurrency })
+    .from(household)
+    .where(eq(household.id, householdId))
+    .limit(1);
+
+  if (!householdRow) {
+    throw new Error(`Household not found: ${householdId}`);
+  }
+
+  const journalIds = journalRows.map((row) => row.id);
+
+  const postingRows = await db
+    .select()
+    .from(posting)
+    .where(inArray(posting.journalId, journalIds));
+
+  const facilityRows = await db
+    .select()
+    .from(journalFacilityUse)
+    .where(inArray(journalFacilityUse.journalId, journalIds));
+
+  const postingsByJournal = new Map<string, Array<typeof posting.$inferSelect>>();
+  for (const row of postingRows) {
+    const list = postingsByJournal.get(row.journalId) ?? [];
+    list.push(row);
+    postingsByJournal.set(row.journalId, list);
+  }
+
+  const facilityByJournal = new Map<string, Array<typeof journalFacilityUse.$inferSelect>>();
+  for (const row of facilityRows) {
+    const list = facilityByJournal.get(row.journalId) ?? [];
+    list.push(row);
+    facilityByJournal.set(row.journalId, list);
+  }
+
+  return journalRows.map((row) =>
+    toDomainJournal(
+      row,
+      postingsByJournal.get(row.id) ?? [],
+      facilityByJournal.get(row.id) ?? [],
+      householdRow.reportingCurrency,
+    ),
+  );
 }
 
 function toDomainJournal(
