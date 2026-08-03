@@ -1,16 +1,17 @@
 import { and, asc, eq, isNull } from "drizzle-orm";
-import type { AccountType } from "@stonks/ledger";
+import { ValidationError, type AccountType } from "@stonks/ledger";
 import type { Db } from "../client.js";
 import { account, currency } from "../schema/index.js";
 
 /**
- * Household-scoped reads over the `account` table. Every query filters by
+ * Household-scoped access over the `account` table. Every query filters by
  * `household_id` first, so a foreign id is indistinguishable from an unknown
  * one — cross-household access is a security defect, and there is no code
  * path here that can produce it.
  *
- * This is the read half of the account repository; the write methods
- * (`create`, `close`) arrive with the account-management tools.
+ * Writes are additive or state-marking only: `create` inserts a new account,
+ * `close` stamps `closed_at` (idempotently). There is no update or delete of
+ * account history.
  */
 
 export interface AccountRecord {
@@ -30,6 +31,34 @@ export interface AccountRepo {
   list(householdId: string, options?: { includeClosed?: boolean }): Promise<AccountRecord[]>;
   /** Single fetch, household-scoped: a foreign id returns null. */
   getById(householdId: string, id: string): Promise<AccountRecord | null>;
+  /** A known currency by ISO code, or null — the FK source for account currencies. */
+  getCurrency(code: string): Promise<CurrencyRecord | null>;
+  /**
+   * Insert a new account with a generated id. The currency must be a known
+   * `currency` row (else `ValidationError` code CURRENCY) — the same check
+   * the FK enforces, surfaced as a domain error instead of a driver error.
+   */
+  create(householdId: string, input: CreateAccountInput): Promise<AccountRecord>;
+  /**
+   * Stamp `closed_at` on an account of this household, idempotently (an
+   * already-closed account keeps its original timestamp). Returns null for a
+   * foreign or unknown id. The zero-balance rule is the caller's job — the
+   * repo cannot see replay balances.
+   */
+  close(householdId: string, id: string): Promise<AccountRecord | null>;
+}
+
+export interface CreateAccountInput {
+  name: string;
+  type: AccountType;
+  currency: string;
+  taxTreatment?: string | null;
+}
+
+export interface CurrencyRecord {
+  code: string;
+  minorUnits: number;
+  name: string;
 }
 
 /** The joined row shape the queries below select. */
@@ -61,6 +90,21 @@ const selection = {
 };
 
 export function createAccountRepo(db: Db): AccountRepo {
+  async function getById(householdId: string, id: string): Promise<AccountRecord | null> {
+    const [row] = await db
+      .select(selection)
+      .from(account)
+      .innerJoin(currency, eq(account.currency, currency.code))
+      .where(and(eq(account.householdId, householdId), eq(account.id, id)))
+      .limit(1);
+    return row === undefined ? null : toAccountRecord(row);
+  }
+
+  async function getCurrency(code: string): Promise<CurrencyRecord | null> {
+    const [row] = await db.select().from(currency).where(eq(currency.code, code)).limit(1);
+    return row === undefined ? null : row;
+  }
+
   return {
     async list(householdId, options) {
       const conditions = [eq(account.householdId, householdId)];
@@ -76,14 +120,50 @@ export function createAccountRepo(db: Db): AccountRepo {
       return rows.map(toAccountRecord);
     },
 
-    async getById(householdId, id) {
-      const [row] = await db
-        .select(selection)
-        .from(account)
-        .innerJoin(currency, eq(account.currency, currency.code))
-        .where(and(eq(account.householdId, householdId), eq(account.id, id)))
-        .limit(1);
-      return row === undefined ? null : toAccountRecord(row);
+    getById,
+    getCurrency,
+
+    async create(householdId, input) {
+      const known = await getCurrency(input.currency);
+      if (known === null) {
+        throw new ValidationError(
+          `Unknown currency: ${input.currency}`,
+          "CURRENCY",
+          [input.currency],
+        );
+      }
+      const id = crypto.randomUUID();
+      await db.insert(account).values({
+        id,
+        householdId,
+        type: input.type,
+        currency: input.currency,
+        name: input.name,
+        taxTreatment: input.taxTreatment ?? null,
+      });
+      return {
+        id,
+        name: input.name,
+        type: input.type,
+        currency: input.currency,
+        minorUnits: known.minorUnits,
+        taxTreatment: input.taxTreatment ?? null,
+        closedAt: null,
+      };
+    },
+
+    async close(householdId, id) {
+      await db
+        .update(account)
+        .set({ closedAt: new Date() })
+        .where(
+          and(
+            eq(account.householdId, householdId),
+            eq(account.id, id),
+            isNull(account.closedAt),
+          ),
+        );
+      return getById(householdId, id);
     },
   };
 }

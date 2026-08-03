@@ -37,16 +37,19 @@ export const zQuantity = z
     'must be a decimal string with at most 8 decimal places, e.g. "420.00000000"',
   );
 
+/** Signed integer string — e.g. an FX-rate numerator. Parse with `BigInt`. */
+export const zBigIntString = z
+  .string({ error: "must be an integer string (JSON numbers are not accepted)" })
+  .regex(/^-?\d+$/, 'must be an integer string, e.g. "135"');
+
 /** Positive non-zero integer string — the denominator of a rational FX rate. */
-const zPositiveBigIntString = z
+export const zPositiveBigIntString = z
   .string({ error: "must be a positive integer string (JSON numbers are not accepted)" })
   .regex(/^[1-9]\d*$/, 'must be a positive non-zero integer string, e.g. "100"');
 
 /** Rational FX rate as bigint strings — never a float. */
 export const zFxRational = z.object({
-  fxRateN: z
-    .string({ error: "must be an integer string (JSON numbers are not accepted)" })
-    .regex(/^-?\d+$/, 'must be an integer string, e.g. "135"'),
+  fxRateN: zBigIntString,
   fxRateD: zPositiveBigIntString,
 });
 

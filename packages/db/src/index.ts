@@ -6,6 +6,8 @@ export {
   type AccountRecord,
   type AccountRepo,
   type AccountRow,
+  type CreateAccountInput,
+  type CurrencyRecord,
 } from "./repos/account-repo";
 export {
   createJournalRepo,

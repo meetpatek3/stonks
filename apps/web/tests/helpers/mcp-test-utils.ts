@@ -26,11 +26,26 @@ export function makeTestCtx(overrides?: {
       accounts: {
         list: async () => [],
         getById: async () => null,
+        getCurrency: async () => null,
+        create: async () => {
+          throw new Error("accounts.create not stubbed in this test");
+        },
+        close: async () => null,
       },
       journals: {
         listAll: async () => [],
         getById: async () => null,
         findSupersedingId: async () => null,
+      },
+      journalWrites: {
+        insertPosted: async () => {
+          throw new Error("journalWrites.insertPosted not stubbed in this test");
+        },
+        supersedePosted: async () => {
+          throw new Error("journalWrites.supersedePosted not stubbed in this test");
+        },
+        nextSortKey: async () => 0,
+        findByNaturalKey: async () => null,
       },
       ...overrides?.repos,
     },

@@ -7,6 +7,8 @@ import {
   listPositionsTool,
 } from "./portfolio";
 import { getJournalTool, listJournalsTool } from "./journals-read";
+import { recordJournalTool, supersedeJournalTool } from "./journals-write";
+import { closeAccountTool, createAccountTool } from "./accounts";
 
 /**
  * The MCP tool registry. Later tasks add their tools here; the route
@@ -21,4 +23,8 @@ export const MCP_TOOLS: ReadonlyArray<AnyToolDefinition> = [
   listOpenItemsTool,
   listJournalsTool,
   getJournalTool,
+  recordJournalTool,
+  supersedeJournalTool,
+  createAccountTool,
+  closeAccountTool,
 ];

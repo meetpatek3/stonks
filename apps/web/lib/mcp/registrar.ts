@@ -63,12 +63,29 @@ export interface JournalReadRepo {
   findSupersedingId(householdId: string, journalId: string): Promise<string | null>;
 }
 
+/**
+ * The journal mutations, narrowed from `JournalRepo`. Every method here
+ * appends or supersedes — there is deliberately no update/delete path, since
+ * journals are immutable and corrections happen only by supersession.
+ * Production wires this to the same `createJournalRepo(db)` instance as the
+ * read side.
+ */
+export interface JournalWriteRepo {
+  insertPosted(journal: Journal, householdId: string): Promise<void>;
+  supersedePosted(householdId: string, oldId: string, replacement: Journal): Promise<void>;
+  /** Next free POSTED sort_key for (household, trade_date) — server-assigned only. */
+  nextSortKey(householdId: string, tradeDate: string): Promise<number>;
+  /** Idempotency lookup for `externalNaturalKey`, household-scoped. */
+  findByNaturalKey(householdId: string, key: string): Promise<string | null>;
+}
+
 /** Repos injected into every tool handler. Later tasks extend this. */
 export interface McpRepos {
   household: HouseholdInfoRepo;
   portfolio: PortfolioSnapshotRepo;
   accounts: AccountRepo;
   journals: JournalReadRepo;
+  journalWrites: JournalWriteRepo;
 }
 
 export interface McpToolContext {

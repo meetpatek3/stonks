@@ -33,6 +33,7 @@ function createHouseholdInfoRepo(db: Db): HouseholdInfoRepo {
  * scoped by it downstream.
  */
 export function createToolContext(db: Db, auth: McpAuth): McpToolContext {
+  const journals = createJournalRepo(db);
   return {
     householdId: auth.householdId,
     scope: auth.scope,
@@ -44,7 +45,10 @@ export function createToolContext(db: Db, auth: McpAuth): McpToolContext {
         getSnapshot: (householdId) => getPortfolioSnapshot(db, householdId),
       },
       accounts: createAccountRepo(db),
-      journals: createJournalRepo(db),
+      // One journal repo instance backs both the narrowed read and write
+      // interfaces; the repo has no update/delete path by design.
+      journals,
+      journalWrites: journals,
     },
   };
 }

@@ -37,10 +37,13 @@ const JOURNAL_TYPES = [
   "OPENING",
 ] as const;
 
+/** The journal type list, shared with the write tools' input schema. */
+export const JOURNAL_TYPE_VALUES = JOURNAL_TYPES;
+
 const DEFAULT_LIMIT = 50;
 
 /** Domain journal → wire JSON. Every money/quantity/FX field is a string. */
-function journalToWire(journal: Journal) {
+export function journalToWire(journal: Journal) {
   return {
     id: journal.id,
     type: journal.type,
