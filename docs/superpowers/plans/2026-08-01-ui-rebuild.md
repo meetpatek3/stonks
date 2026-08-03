@@ -456,8 +456,12 @@ done; the persistence and wiring are missing.
 
 **Goal:** real quotes behind the existing `MarketDataProvider` interface, plus manual overrides.
 
+**Provider (owner decision 2026-08-03): Twelve Data.** Free tier ~800 requests/day, covers
+stocks, ETFs and FX across US and international exchanges including TSX. Requires
+`TWELVEDATA_API_KEY`. The fixture provider stays the default when no key is configured.
+
 **Files:** `apps/web/lib/market/provider.ts` (new),
-`apps/web/lib/market/<chosen-provider>.ts` (new), `apps/web/lib/market/price-service.ts` (new),
+`apps/web/lib/market/twelve-data.ts` (new), `apps/web/lib/market/price-service.ts` (new),
 `apps/web/tests/price-service.test.ts` (new), `.env.example`
 
 **Steps**
