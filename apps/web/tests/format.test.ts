@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   formatBps,
+  formatCompactNumber,
   formatMoney,
   formatQuantity,
   formatUncertain,
@@ -112,5 +113,23 @@ describe("formatUncertain", () => {
     expect(UNKNOWN).not.toBe("0");
     expect(UNKNOWN).not.toBe("—");
     expect(UNKNOWN.length).toBeGreaterThan(0);
+  });
+});
+
+describe("formatCompactNumber", () => {
+  it("abbreviates thousands", () => {
+    expect(formatCompactNumber(1500)).toBe("1.5K");
+  });
+
+  it("abbreviates millions", () => {
+    expect(formatCompactNumber(2_400_000)).toBe("2.4M");
+  });
+
+  it("leaves a small value readable", () => {
+    expect(formatCompactNumber(42)).toBe("42");
+  });
+
+  it("keeps the sign on a negative value", () => {
+    expect(formatCompactNumber(-1500)).toBe("-1.5K");
   });
 });

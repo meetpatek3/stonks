@@ -4,6 +4,10 @@ import {
   derivePortfolioSnapshot,
   type AccountMeta,
 } from "@/lib/portfolio-derive";
+import {
+  emptyPortfolioSnapshot,
+  reportingMinorUnits,
+} from "@/lib/portfolio-shared";
 
 /**
  * All expected values in this file are hand-calculated from the journals
@@ -313,5 +317,47 @@ describe("derivePortfolioSnapshot open items", () => {
 
     expect(counts.unknownCost).toBe(1);
     expect(counts.total).toBe(1);
+  });
+});
+
+describe("reportingMinorUnits", () => {
+  it("reads the scale off an account held in the reporting currency", () => {
+    expect(reportingMinorUnits(snapshot())).toBe(2);
+  });
+
+  it("returns a zero-decimal scale for a JPY-reporting household", () => {
+    const jpy = derivePortfolioSnapshot({
+      householdId: "hh-jpy",
+      reportingCurrency: "JPY",
+      accounts: [
+        { id: "cash", name: "Cash", type: "CASH", currency: "JPY", minorUnits: 0 },
+        { id: "world", name: "Outside", type: "EXTERNAL", currency: "JPY", minorUnits: 0 },
+      ],
+      journals: [
+        {
+          id: "j-jpy-deposit",
+          type: "DEPOSIT",
+          tradeDate: "2024-03-01",
+          sortKey: 0,
+          status: "POSTED",
+          source: "MANUAL",
+          postings: [
+            { accountId: "cash", amount: money("JPY", 1_500n) },
+            { accountId: "world", amount: money("JPY", -1_500n) },
+          ],
+        },
+      ],
+    });
+
+    expect(reportingMinorUnits(jpy)).toBe(0);
+    // 1,500 JPY minor units are 1,500 yen: a zero-decimal currency.
+    expect(jpy.netWorthMinor).toBe("1500");
+  });
+
+  it("falls back to two decimals when no account holds the reporting currency", () => {
+    const empty = emptyPortfolioSnapshot({ reportingCurrency: "CAD" });
+    expect(reportingMinorUnits(empty)).toBe(2);
+    // The fallback never scales a real figure: there is nothing to total.
+    expect(empty.netWorthMinor).toBe("0");
   });
 });

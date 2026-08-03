@@ -242,4 +242,25 @@ export function emptyPortfolioSnapshot(
   };
 }
 
+/**
+ * Minor-unit scale of the reporting currency.
+ *
+ * Every money figure stated at household level — `netWorthMinor`,
+ * `totalInvestedMinor`, `totalBorrowedMinor`, `ValuePoint.valueMinor`,
+ * `AllocationRow.costReportingMinor`, the whole `TaxSummary` — is in the
+ * reporting currency, but the scale is carried per *balance*, because that is
+ * where the `currency` table's `minorUnits` reaches the snapshot. Read it off
+ * an account denominated in the reporting currency.
+ *
+ * The fallback is never applied to a real figure: `sumTotals` excludes every
+ * balance not in the reporting currency, so with no such account the totals
+ * are zero and there is nothing to scale.
+ */
+export function reportingMinorUnits(snapshot: PortfolioSnapshot): number {
+  const match = snapshot.balances.find(
+    (row) => row.currency === snapshot.reportingCurrency,
+  );
+  return match?.minorUnits ?? 2;
+}
+
 export { formatMoney } from "@/lib/format";

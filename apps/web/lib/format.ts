@@ -84,6 +84,26 @@ export function minorToDisplayNumber(minor: string, minorUnits: number): number 
 }
 
 /**
+ * Compact rendering of a chart-axis value.
+ *
+ * The input is a display `number` already produced by `minorToDisplayNumber`,
+ * never a raw money value — this exists so that no component has to reach for
+ * `Intl` itself to label an axis. Display-only, exactly like the conversion
+ * that produced its input. No currency symbol: the axis is labelled with its
+ * currency once, rather than on every tick.
+ */
+export function formatCompactNumber(value: number, locale = "en-CA"): string {
+  try {
+    return new Intl.NumberFormat(locale, {
+      notation: "compact",
+      maximumFractionDigits: 1,
+    }).format(value);
+  } catch {
+    return String(value);
+  }
+}
+
+/**
  * Trim trailing zeros from a ledger fixed-scale decimal quantity string,
  * without ever converting through `Number`.
  */
