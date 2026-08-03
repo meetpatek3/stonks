@@ -38,7 +38,7 @@ const CHART_TOKENS = [
   "var(--chart-5)",
 ] as const;
 
-export function chartToken(index: number): string {
+function chartToken(index: number): string {
   return CHART_TOKENS[index % CHART_TOKENS.length] as string;
 }
 
