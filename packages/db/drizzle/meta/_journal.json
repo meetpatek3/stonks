@@ -29,6 +29,13 @@
       "when": 1785595887473,
       "tag": "0003_household_auth",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1785757734244,
+      "tag": "0004_light_masque",
+      "breakpoints": true
     }
   ]
 }

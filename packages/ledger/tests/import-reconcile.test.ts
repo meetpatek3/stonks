@@ -36,7 +36,11 @@ function parseJournal(raw: {
     sortKey: raw.sortKey,
     status: raw.status,
     source: raw.source,
-    externalNaturalKey: raw.externalNaturalKey,
+    // Spread conditionally: under exactOptionalPropertyTypes an explicit
+    // `undefined` is not assignable to an optional property.
+    ...(raw.externalNaturalKey === undefined
+      ? {}
+      : { externalNaturalKey: raw.externalNaturalKey }),
     postings: raw.postings.map(parseMoneyPosting),
   };
 }

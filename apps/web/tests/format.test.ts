@@ -1,0 +1,169 @@
+import { describe, expect, it } from "vitest";
+import {
+  bpsTrend,
+  formatBps,
+  formatCompactNumber,
+  formatMoney,
+  formatReportingMoney,
+  formatQuantity,
+  formatUncertain,
+  minorToDisplayNumber,
+  signedTrend,
+  UNKNOWN,
+} from "@/lib/format";
+
+describe("formatMoney", () => {
+  it("formats a positive CAD value with thousands grouping", () => {
+    expect(formatMoney("123456789", "CAD", 2)).toBe("$1,234,567.89");
+  });
+
+  it("formats a negative value with a leading minus", () => {
+    expect(formatMoney("-500", "CAD", 2)).toBe("-$5.00");
+  });
+
+  it("formats a zero-minor-unit currency (JPY) without a decimal point", () => {
+    expect(formatMoney("1500", "JPY", 0)).toBe("JP¥1,500");
+  });
+
+  it("formats a value smaller than one major unit", () => {
+    expect(formatMoney("5", "USD", 2)).toBe("US$0.05");
+  });
+});
+
+describe("minorToDisplayNumber", () => {
+  it("converts minor units to a display number", () => {
+    expect(minorToDisplayNumber("123456", 2)).toBeCloseTo(1234.56);
+  });
+
+  it("converts a negative minor value", () => {
+    expect(minorToDisplayNumber("-500", 2)).toBeCloseTo(-5);
+  });
+
+  it("handles zero minor units (e.g. JPY)", () => {
+    expect(minorToDisplayNumber("1500", 0)).toBe(1500);
+  });
+
+  it("handles a zero value", () => {
+    expect(minorToDisplayNumber("0", 2)).toBe(0);
+  });
+});
+
+describe("formatQuantity", () => {
+  it("trims trailing zeros to a whole number", () => {
+    expect(formatQuantity("420.00000000")).toBe("420");
+  });
+
+  it("trims trailing zeros to a fraction", () => {
+    expect(formatQuantity("0.50000000")).toBe("0.5");
+  });
+
+  it("keeps a non-trailing-zero fractional digit", () => {
+    expect(formatQuantity("1000.00000001")).toBe("1000.00000001");
+  });
+
+  it("formats a negative quantity", () => {
+    expect(formatQuantity("-42.50000000")).toBe("-42.5");
+  });
+
+  it("formats a whole-number string with no decimal point", () => {
+    expect(formatQuantity("100")).toBe("100");
+  });
+});
+
+describe("formatBps", () => {
+  it("formats a positive bps value", () => {
+    expect(formatBps(842)).toBe("8.42%");
+  });
+
+  it("formats a negative bps value", () => {
+    expect(formatBps(-125)).toBe("-1.25%");
+  });
+
+  it("formats zero", () => {
+    expect(formatBps(0)).toBe("0.00%");
+  });
+});
+
+describe("signedTrend", () => {
+  it("returns up for a positive minor value", () => {
+    expect(signedTrend("100")).toBe("up");
+  });
+
+  it("returns down for a negative minor value", () => {
+    expect(signedTrend("-100")).toBe("down");
+  });
+
+  it("returns neutral for a zero minor value", () => {
+    expect(signedTrend("0")).toBe("neutral");
+  });
+});
+
+describe("bpsTrend", () => {
+  it("classifies a gain, a loss and a flat return", () => {
+    expect(bpsTrend(1250)).toBe("up");
+    expect(bpsTrend(-1250)).toBe("down");
+    expect(bpsTrend(0)).toBe("neutral");
+  });
+
+  it("agrees with signedTrend on the same sign", () => {
+    // The two classify different kinds of value — a ratio and a money
+    // amount — but a gain must never read as a gain in one and not the other.
+    expect(bpsTrend(1)).toBe(signedTrend("1"));
+    expect(bpsTrend(-1)).toBe(signedTrend("-1"));
+    expect(bpsTrend(0)).toBe(signedTrend("0"));
+  });
+});
+
+describe("formatUncertain", () => {
+  it("returns the UNKNOWN marker for undefined", () => {
+    expect(formatUncertain(undefined)).toBe(UNKNOWN);
+  });
+
+  it("returns the UNKNOWN marker for null", () => {
+    expect(formatUncertain(null)).toBe(UNKNOWN);
+  });
+
+  it("returns the formatted value when present", () => {
+    expect(formatUncertain("$5.00")).toBe("$5.00");
+  });
+
+  it("UNKNOWN is a visible marker, not a bare dash or zero", () => {
+    expect(UNKNOWN).not.toBe("0");
+    expect(UNKNOWN).not.toBe("—");
+    expect(UNKNOWN.length).toBeGreaterThan(0);
+  });
+});
+
+describe("formatCompactNumber", () => {
+  it("abbreviates thousands", () => {
+    expect(formatCompactNumber(1500)).toBe("1.5K");
+  });
+
+  it("abbreviates millions", () => {
+    expect(formatCompactNumber(2_400_000)).toBe("2.4M");
+  });
+
+  it("leaves a small value readable", () => {
+    expect(formatCompactNumber(42)).toBe("42");
+  });
+
+  it("keeps the sign on a negative value", () => {
+    expect(formatCompactNumber(-1500)).toBe("-1.5K");
+  });
+});
+
+describe("formatReportingMoney", () => {
+  it("formats when the reporting currency's scale is known", () => {
+    expect(formatReportingMoney("150000", "JPY", 0)).toBe("JP¥150,000");
+    expect(formatReportingMoney("150000", "CAD", 2)).toBe("$1,500.00");
+  });
+
+  it("returns the UNKNOWN marker rather than guessing a scale", () => {
+    // Guessing 2 here would render 150,000 yen as ¥1,500.00 — a 100x error.
+    expect(formatReportingMoney("150000", "JPY", null)).toBe(UNKNOWN);
+  });
+
+  it("never falls back to a zero", () => {
+    expect(formatReportingMoney("150000", "JPY", null)).not.toContain("0.00");
+  });
+});

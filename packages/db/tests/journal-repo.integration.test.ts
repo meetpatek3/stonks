@@ -66,9 +66,14 @@ describeIfDb("journal repo integration", () => {
     ]);
   });
 
+  const supersededId = `j-superseded-${suffix}`;
+  const correctionId = `j-correction-${suffix}`;
+
   afterAll(async () => {
-    await db.delete(posting).where(eq(posting.journalId, journalId));
-    await db.delete(journal).where(eq(journal.id, journalId));
+    for (const id of [journalId, supersededId, correctionId]) {
+      await db.delete(posting).where(eq(posting.journalId, id));
+      await db.delete(journal).where(eq(journal.id, id));
+    }
     await db.delete(account).where(eq(account.householdId, householdId));
     await db.delete(household).where(eq(household.id, householdId));
   });
@@ -89,5 +94,85 @@ describeIfDb("journal repo integration", () => {
       expect(roundTripped!.currency).toBe(balance.currency);
       expect(roundTripped!.minor).toBe(balance.minor);
     }
+  });
+
+  it("listAll returns SUPERSEDED journals with supersedesJournalId; listPosted does not", async () => {
+    // Correction workflow: an earlier posted journal is superseded in place
+    // (status flip), and a new POSTED journal points at it via
+    // supersedesJournalId. Insert the original as POSTED, then flip it and
+    // insert the correction — insertPosted rejects non-POSTED.
+    const original: Journal = {
+      id: supersededId,
+      type: "DEPOSIT",
+      tradeDate: "2024-02-01",
+      sortKey: 0,
+      status: "POSTED",
+      source: "MANUAL",
+      memo: "wrong amount",
+      postings: [
+        { accountId: extAccountId, amount: money("CAD", -50_000n) },
+        { accountId: cashAccountId, amount: money("CAD", 50_000n) },
+      ],
+    };
+    await repo.insertPosted(original, householdId);
+
+    await db
+      .update(journal)
+      .set({ status: "SUPERSEDED" })
+      .where(eq(journal.id, supersededId));
+
+    const correction: Journal = {
+      id: correctionId,
+      type: "DEPOSIT",
+      tradeDate: "2024-02-01",
+      sortKey: 1,
+      status: "POSTED",
+      source: "MANUAL",
+      memo: "corrected amount",
+      supersedesJournalId: supersededId,
+      postings: [
+        { accountId: extAccountId, amount: money("CAD", -75_000n) },
+        { accountId: cashAccountId, amount: money("CAD", 75_000n) },
+      ],
+    };
+    await repo.insertPosted(correction, householdId);
+
+    const posted = await repo.listPosted(householdId);
+    expect(posted.map((j) => j.id).sort()).toEqual(
+      [journalId, correctionId].sort(),
+    );
+    expect(posted.every((j) => j.status === "POSTED")).toBe(true);
+
+    const all = await repo.listAll(householdId);
+    expect(all.map((j) => j.id).sort()).toEqual(
+      [journalId, supersededId, correctionId].sort(),
+    );
+
+    const superseded = all.find((j) => j.id === supersededId);
+    expect(superseded).toEqual(
+      expect.objectContaining({
+        id: supersededId,
+        status: "SUPERSEDED",
+        memo: "wrong amount",
+      }),
+    );
+    expect(superseded!.postings).toHaveLength(2);
+    expect(superseded!.postings[0]!.amount.minor).toBe(-50_000n);
+
+    const correcting = all.find((j) => j.id === correctionId);
+    expect(correcting?.supersedesJournalId).toBe(supersededId);
+    expect(correcting?.status).toBe("POSTED");
+
+    // Replay must still see only POSTED — listAll must not change that.
+    const replayed = replay(posted, accounts, "CAD");
+    const expected = replay(
+      [depositJournal, { ...correction }],
+      accounts,
+      "CAD",
+    );
+    expect(replayed.ledgerVersion).toBe(expected.ledgerVersion);
+    expect(replayed.balances.get(cashAccountId)?.minor).toBe(
+      expected.balances.get(cashAccountId)?.minor,
+    );
   });
 });

@@ -11,10 +11,11 @@ Self-hosted portfolio tracker. Double-entry ledger is source of truth; balances/
 
 ## Stack
 
-- UI: HeroUI v3 (`@heroui/react`) + HeroUI Pro (`@heroui-pro/react`) with **glass** theme from attached Pro theme (keep `apps/web/app/globals.css` Pro overrides intact; Inter is intentional for that theme)
+- UI: HeroUI v3 (`@heroui/react`) + HeroUI Pro (`@heroui-pro/react`) on the stock HeroUI **default dark** theme — no custom CSS. `apps/web/app/globals.css` must contain only the three import statements (see the Task 1 plan's Global Constraints); do not add custom properties, `@theme` rules, or a custom font
 - Auth: simple username/password → signed cookie (`AUTH_SECRET`, `jose`). Bootstrap first household from `AUTH_USERNAME` / `AUTH_PASSWORD` when DB empty. Credentials stored on `household.auth_username` / `auth_password_hash`
 - DB: Postgres via Docker locally; **Neon** on Vercel (`DATABASE_URL`). Drizzle uses `postgres` (postgres.js) with `prepare: false` / `max: 1` on Vercel
 - Package manager: pnpm workspaces. HeroUI Pro needs `HEROUI_AUTH_TOKEN` at install (Infisical key `HEROUI_AUTH_TOKEN`)
+- Market data: optional `TWELVEDATA_API_KEY` selects the Twelve Data provider (`apps/web/lib/market/`). Unset — the default — uses the fixture provider, so self-hosting needs no market-data account; prices then read as unknown rather than being invented. Persisted `price_quote` rows are the cache; there is no separate caching layer
 
 ## Commands
 
@@ -34,6 +35,8 @@ Production: Vercel project `meetpatek/stonks`, Neon resource `stonks-db`. Login 
 - Journals are immutable; corrections use supersession (`SUPERSEDED`)
 - Replay order: `trade_date` then `sort_key`
 - Reporting currency FX uses rational `n/d` on postings
+- Provider price strings become minor units via `decimalStringToMinor` (string + `BigInt` only, half away from zero) — never `Number`/`parseFloat`
+- A price is resolved in the security's own currency; overrides win, an older quote is returned with its real `as_of` and `stale: true`, and an unavailable price is `NONE`, never substituted
 
 ## Deploy notes
 
