@@ -1,5 +1,8 @@
-import { RebuildingPlaceholder } from "@/components/rebuilding-placeholder";
+import { PositionsScreen } from "@/components/positions-screen";
+import { loadSessionSnapshot } from "@/lib/portfolio";
 
-export default function PositionsPage() {
-  return <RebuildingPlaceholder screen="Positions" />;
+export const dynamic = "force-dynamic";
+
+export default async function PositionsPage() {
+  return <PositionsScreen snapshot={await loadSessionSnapshot()} />;
 }
