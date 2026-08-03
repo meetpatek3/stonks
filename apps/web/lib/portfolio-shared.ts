@@ -171,6 +171,18 @@ export type PortfolioSnapshot = {
   totalInvestedMinor: string;
   totalBorrowedMinor: string;
   /**
+   * Minor-unit scale of the reporting currency, or `null` when it could not
+   * be established.
+   *
+   * Every household-level money field above is in the reporting currency, but
+   * the per-balance `minorUnits` only covers currencies an account is held
+   * in — and `AllocationRow.costReportingMinor` is a reporting-currency
+   * amount that exists whether or not any *account* is denominated in it. A
+   * guessed scale moves the decimal point, so this is `null` rather than a
+   * default and the UI must render the `UNKNOWN` marker for such figures.
+   */
+  reportingMinorUnits: number | null;
+  /**
    * True when at least one balance is held in a currency other than the
    * reporting currency and no FX rate was available to convert it. Such
    * balances are excluded from the totals above; the flag exists so the UI
@@ -226,6 +238,7 @@ export function emptyPortfolioSnapshot(
     netWorthMinor: "0",
     totalInvestedMinor: "0",
     totalBorrowedMinor: "0",
+    reportingMinorUnits: null,
     totalsAreUncertain: false,
     allocation: [],
     allocationBasis: "COST",
@@ -240,27 +253,6 @@ export function emptyPortfolioSnapshot(
     },
     taxSummary: null,
   };
-}
-
-/**
- * Minor-unit scale of the reporting currency.
- *
- * Every money figure stated at household level — `netWorthMinor`,
- * `totalInvestedMinor`, `totalBorrowedMinor`, `ValuePoint.valueMinor`,
- * `AllocationRow.costReportingMinor`, the whole `TaxSummary` — is in the
- * reporting currency, but the scale is carried per *balance*, because that is
- * where the `currency` table's `minorUnits` reaches the snapshot. Read it off
- * an account denominated in the reporting currency.
- *
- * The fallback is never applied to a real figure: `sumTotals` excludes every
- * balance not in the reporting currency, so with no such account the totals
- * are zero and there is nothing to scale.
- */
-export function reportingMinorUnits(snapshot: PortfolioSnapshot): number {
-  const match = snapshot.balances.find(
-    (row) => row.currency === snapshot.reportingCurrency,
-  );
-  return match?.minorUnits ?? 2;
 }
 
 export { formatMoney } from "@/lib/format";

@@ -7,6 +7,8 @@ import {
   type Db,
 } from "@stonks/db";
 import { cache } from "react";
+import { getSession } from "@/lib/auth/session";
+import { getDb } from "@/lib/db";
 import { derivePortfolioSnapshot, type AccountMeta } from "@/lib/portfolio-derive";
 import { emptyPortfolioSnapshot, type PortfolioSnapshot } from "@/lib/portfolio-shared";
 
@@ -51,6 +53,18 @@ async function loadPortfolioSnapshot(
 
   const reportingCurrency = householdRow.reportingCurrency;
 
+  // The reporting currency's own scale. `household.reportingCurrency` is a
+  // NOT NULL foreign key onto `currency.code`, so this row exists; it is read
+  // explicitly rather than inferred from the accounts because a
+  // reporting-currency amount (an ACB cost, a tax figure) can exist with no
+  // account denominated in that currency at all.
+  const reportingMinorUnits = await db
+    .select({ minorUnits: currency.minorUnits })
+    .from(currency)
+    .where(eq(currency.code, reportingCurrency))
+    .limit(1)
+    .then((rows) => rows[0]?.minorUnits);
+
   const accountRows = await db
     .select({
       id: account.id,
@@ -77,6 +91,7 @@ async function loadPortfolioSnapshot(
   return derivePortfolioSnapshot({
     householdId,
     reportingCurrency,
+    ...(reportingMinorUnits === undefined ? {} : { reportingMinorUnits }),
     accounts,
     journals,
   });
@@ -95,3 +110,27 @@ async function loadPortfolioSnapshot(
  * call, so this is safe to import anywhere.
  */
 export const getPortfolioSnapshot = cache(loadPortfolioSnapshot);
+
+/**
+ * The snapshot for the current request, or an empty one naming why there is
+ * none.
+ *
+ * Every page renders the same two failure modes — no database configured, and
+ * no session — and each one's `EmptyState` reads the reason off
+ * `snapshot.message`. Single-sourced here so the wording and the precedence
+ * (a missing database is reported before a missing session, because it is the
+ * more fundamental one) cannot drift between routes.
+ */
+export async function loadSessionSnapshot(): Promise<PortfolioSnapshot> {
+  const db = getDb();
+  if (!db) {
+    return emptyPortfolioSnapshot({ message: "DATABASE_URL not configured" });
+  }
+
+  const session = await getSession();
+  if (!session) {
+    return emptyPortfolioSnapshot({ message: "not authenticated" });
+  }
+
+  return getPortfolioSnapshot(db, session.householdId);
+}

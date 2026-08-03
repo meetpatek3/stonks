@@ -9,7 +9,7 @@ import { Icon } from "@iconify/react";
 import {
   formatBps,
   formatCompactNumber,
-  formatMoney,
+  formatReportingMoney,
   minorToDisplayNumber,
 } from "@/lib/format";
 import type { AllocationBasis, AllocationRow, ValuePoint } from "@/lib/portfolio-shared";
@@ -45,9 +45,14 @@ function chartToken(index: number): string {
 /** The single series colour for a one-series chart. */
 const SERIES_TOKEN = "var(--chart-3)";
 
+/**
+ * How to render a reporting-currency amount. `minorUnits` is `null` when the
+ * reporting currency's scale could not be established; every formatter below
+ * then shows the `UNKNOWN` marker instead of a number at a guessed scale.
+ */
 type MoneyContext = {
   currency: string;
-  minorUnits: number;
+  minorUnits: number | null;
 };
 
 /**
@@ -130,6 +135,17 @@ export function ValueOverTimeChart({
     );
   }
 
+  if (minorUnits === null) {
+    // Plotting needs a scale, and the axis would be out by a factor of a
+    // hundred if it were guessed. Say so rather than draw a wrong chart.
+    return (
+      <ChartEmpty
+        title="Value history cannot be drawn"
+        description={`No minor-unit scale is recorded for ${currency}, so the values cannot be placed on an axis.`}
+      />
+    );
+  }
+
   const data = toValueData(points, minorUnits);
   const minWidth = Math.max(280, data.length * 56);
 
@@ -193,7 +209,7 @@ function ValueTooltip({
         <ChartTooltip.Indicator color={SERIES_TOKEN} />
         <ChartTooltip.Label>Net worth</ChartTooltip.Label>
         <ChartTooltip.Value>
-          {formatMoney(datum.minor, currency, minorUnits)}
+          {formatReportingMoney(datum.minor, currency, minorUnits)}
         </ChartTooltip.Value>
       </ChartTooltip.Item>
       {datum.uncertain === 1 ? (
@@ -345,7 +361,7 @@ export function AllocationPieChart({
             </span>
             <span className="tabular-nums text-muted">{formatBps(datum.bps)}</span>
             <span className="tabular-nums text-foreground">
-              {formatMoney(datum.costReportingMinor, currency, minorUnits)}
+              {formatReportingMoney(datum.costReportingMinor, currency, minorUnits)}
             </span>
           </li>
         ))}
@@ -374,7 +390,7 @@ function AllocationTooltip({
       <ChartTooltip.Item>
         <ChartTooltip.Label>Cost basis</ChartTooltip.Label>
         <ChartTooltip.Value>
-          {formatMoney(datum.costReportingMinor, currency, minorUnits)}
+          {formatReportingMoney(datum.costReportingMinor, currency, minorUnits)}
         </ChartTooltip.Value>
       </ChartTooltip.Item>
     </ChartTooltip>

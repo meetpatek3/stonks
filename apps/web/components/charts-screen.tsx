@@ -3,10 +3,7 @@
 import { Card, Chip } from "@heroui/react";
 import { EmptyState } from "@heroui-pro/react/empty-state";
 import { Icon } from "@iconify/react";
-import {
-  reportingMinorUnits,
-  type PortfolioSnapshot,
-} from "@/lib/portfolio-shared";
+import type { PortfolioSnapshot } from "@/lib/portfolio-shared";
 import {
   AllocationBasisChip,
   AllocationPieChart,
@@ -29,7 +26,7 @@ import {
  */
 export function ChartsScreen({ snapshot }: { snapshot: PortfolioSnapshot }) {
   const currency = snapshot.reportingCurrency ?? "CAD";
-  const minorUnits = reportingMinorUnits(snapshot);
+  const minorUnits = snapshot.reportingMinorUnits;
 
   const accountName = (accountId: string) =>
     snapshot.balances.find((row) => row.accountId === accountId)?.accountName ??

@@ -3,6 +3,7 @@ import {
   formatBps,
   formatCompactNumber,
   formatMoney,
+  formatReportingMoney,
   formatQuantity,
   formatUncertain,
   minorToDisplayNumber,
@@ -131,5 +132,21 @@ describe("formatCompactNumber", () => {
 
   it("keeps the sign on a negative value", () => {
     expect(formatCompactNumber(-1500)).toBe("-1.5K");
+  });
+});
+
+describe("formatReportingMoney", () => {
+  it("formats when the reporting currency's scale is known", () => {
+    expect(formatReportingMoney("150000", "JPY", 0)).toBe("JP¥150,000");
+    expect(formatReportingMoney("150000", "CAD", 2)).toBe("$1,500.00");
+  });
+
+  it("returns the UNKNOWN marker rather than guessing a scale", () => {
+    // Guessing 2 here would render 150,000 yen as ¥1,500.00 — a 100x error.
+    expect(formatReportingMoney("150000", "JPY", null)).toBe(UNKNOWN);
+  });
+
+  it("never falls back to a zero", () => {
+    expect(formatReportingMoney("150000", "JPY", null)).not.toContain("0.00");
   });
 });

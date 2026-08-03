@@ -52,6 +52,17 @@ export type DerivePortfolioInput = {
   accounts: readonly AccountMeta[];
   journals: readonly Journal[];
   /**
+   * Minor-unit scale of the reporting currency, from the `currency` table.
+   *
+   * Optional so in-memory callers need not supply it. When omitted it is
+   * inferred from an account denominated in the reporting currency —
+   * `AccountMeta.minorUnits` comes from the same `currency` row, so the
+   * inference cannot disagree with the table. With neither, the snapshot
+   * carries `null` and the UI marks reporting-currency figures unknown
+   * rather than rendering them at a guessed scale.
+   */
+  reportingMinorUnits?: number;
+  /**
    * Tax year for `taxSummary`. Defaults to the year of the most recent posted
    * journal — the latest year the ledger actually has something to say about,
    * and unlike "this year" it does not go blank as the wall clock rolls into
@@ -148,6 +159,10 @@ export function derivePortfolioSnapshot(
     balances,
     balancesByType,
     positions,
+    reportingMinorUnits:
+      input.reportingMinorUnits ??
+      accounts.find((meta) => meta.currency === reportingCurrency)?.minorUnits ??
+      null,
     netWorthMinor: totals.netWorth.toString(),
     totalInvestedMinor: totals.invested.toString(),
     totalBorrowedMinor: totals.borrowed.toString(),

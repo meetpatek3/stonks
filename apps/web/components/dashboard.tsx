@@ -8,17 +8,18 @@ import { TrendChip } from "@heroui-pro/react/trend-chip";
 import { Icon } from "@iconify/react";
 import Link from "next/link";
 import {
+  DISPLAY_LOCALE,
   UNKNOWN,
   formatMoney,
+  formatReportingMoney,
   minorToDisplayNumber,
   signedTrend,
 } from "@/lib/format";
 import type { AccountType } from "@stonks/ledger";
-import {
-  reportingMinorUnits,
-  type BalanceRow,
-  type PortfolioSnapshot,
-  type ValuePoint,
+import type {
+  BalanceRow,
+  PortfolioSnapshot,
+  ValuePoint,
 } from "@/lib/portfolio-shared";
 import {
   AllocationBasisChip,
@@ -46,7 +47,7 @@ type DashboardProps = {
 
 export function Dashboard({ snapshot }: DashboardProps) {
   const currency = snapshot.reportingCurrency ?? "CAD";
-  const minorUnits = reportingMinorUnits(snapshot);
+  const minorUnits = snapshot.reportingMinorUnits;
   const change = netWorthChange(snapshot.valueOverTime);
 
   if (snapshot.balances.length === 0) {
@@ -79,17 +80,14 @@ export function Dashboard({ snapshot }: DashboardProps) {
             </KPI.Icon>
           </KPI.Header>
           <KPI.Content>
-            <KPI.Value
-              value={minorToDisplayNumber(snapshot.netWorthMinor, minorUnits)}
-              style="currency"
+            <ReportingMoneyValue
+              minor={snapshot.netWorthMinor}
               currency={currency}
-              locale="en-CA"
-              minimumFractionDigits={minorUnits}
-              maximumFractionDigits={minorUnits}
+              minorUnits={minorUnits}
             />
             {change ? (
               <KPI.Trend trend={signedTrend(change.minor)}>
-                {formatMoney(change.minor, currency, minorUnits)}
+                {formatReportingMoney(change.minor, currency, minorUnits)}
               </KPI.Trend>
             ) : null}
           </KPI.Content>
@@ -110,13 +108,10 @@ export function Dashboard({ snapshot }: DashboardProps) {
             </KPI.Icon>
           </KPI.Header>
           <KPI.Content>
-            <KPI.Value
-              value={minorToDisplayNumber(snapshot.totalInvestedMinor, minorUnits)}
-              style="currency"
+            <ReportingMoneyValue
+              minor={snapshot.totalInvestedMinor}
               currency={currency}
-              locale="en-CA"
-              minimumFractionDigits={minorUnits}
-              maximumFractionDigits={minorUnits}
+              minorUnits={minorUnits}
             />
           </KPI.Content>
           <KPI.Footer>
@@ -137,13 +132,10 @@ export function Dashboard({ snapshot }: DashboardProps) {
             </KPI.Icon>
           </KPI.Header>
           <KPI.Content>
-            <KPI.Value
-              value={minorToDisplayNumber(snapshot.totalBorrowedMinor, minorUnits)}
-              style="currency"
+            <ReportingMoneyValue
+              minor={snapshot.totalBorrowedMinor}
               currency={currency}
-              locale="en-CA"
-              minimumFractionDigits={minorUnits}
-              maximumFractionDigits={minorUnits}
+              minorUnits={minorUnits}
             />
           </KPI.Content>
           <KPI.Footer>
@@ -186,7 +178,10 @@ export function Dashboard({ snapshot }: DashboardProps) {
             </KPI.Icon>
           </KPI.Header>
           <KPI.Content>
-            <KPI.Value value={snapshot.openItemCounts.total} locale="en-CA" />
+            <KPI.Value
+              value={snapshot.openItemCounts.total}
+              locale={DISPLAY_LOCALE}
+            />
           </KPI.Content>
           <KPI.Footer>
             <Link href="/open-items" className="text-sm text-accent">
@@ -255,6 +250,46 @@ export function Dashboard({ snapshot }: DashboardProps) {
 }
 
 /**
+ * A reporting-currency headline figure.
+ *
+ * `KPI.Value` wraps `NumberValue`, which needs a `number` — so a figure whose
+ * scale is unknown cannot go through it at all, and renders as the `UNKNOWN`
+ * marker instead. `minorToDisplayNumber` is the only sanctioned money→number
+ * conversion and it is display-only.
+ */
+function ReportingMoneyValue({
+  minor,
+  currency,
+  minorUnits,
+}: {
+  minor: string;
+  currency: string;
+  minorUnits: number | null;
+}) {
+  if (minorUnits === null) {
+    return (
+      <p
+        className="text-3xl font-semibold tracking-tight tabular-nums text-muted"
+        title={`No minor-unit scale is recorded for ${currency}.`}
+      >
+        {UNKNOWN}
+      </p>
+    );
+  }
+
+  return (
+    <KPI.Value
+      value={minorToDisplayNumber(minor, minorUnits)}
+      style="currency"
+      currency={currency}
+      locale={DISPLAY_LOCALE}
+      minimumFractionDigits={minorUnits}
+      maximumFractionDigits={minorUnits}
+    />
+  );
+}
+
+/**
  * The page frame. The currency and ledger-version chips render only when the
  * snapshot actually carries them: with no database there is no reporting
  * currency and no replay, and a "CAD / Ledger v0" pair would state both.
@@ -294,53 +329,59 @@ function Screen({
 /* ------------------------------------------------------------------ */
 
 /**
- * Account types in reading order, with the one liability type flagged.
+ * How each account type is presented, keyed by the type itself.
  *
- * Written as an exhaustive literal so a new `AccountType` is a compile error
- * here rather than a group that quietly stops rendering.
+ * `Record<AccountType, …>` requires a key for every member of the ledger's
+ * union, so adding a member there is a compile error here — the group cannot
+ * silently stop rendering. `order` carries the reading order, because an
+ * object's keys are not a contract about display order.
  */
-const ACCOUNT_GROUPS: {
-  type: AccountType;
+type AccountGroupMeta = {
+  order: number;
   label: string;
   note: string;
   isLiability: boolean;
-}[] = [
-  {
-    type: "INVESTMENT",
+};
+
+const ACCOUNT_GROUPS: Record<AccountType, AccountGroupMeta> = {
+  INVESTMENT: {
+    order: 0,
     label: "Investments",
     note: "Cash and holdings at cost",
     isLiability: false,
   },
-  {
-    type: "CASH",
+  CASH: {
+    order: 1,
     label: "Cash",
     note: "Included in net worth",
     isLiability: false,
   },
-  {
-    type: "RECEIVABLE",
+  RECEIVABLE: {
+    order: 2,
     label: "Receivables",
     note: "Owed to the household",
     isLiability: false,
   },
-  {
-    type: "CREDIT_FACILITY",
+  CREDIT_FACILITY: {
+    order: 3,
     label: "Borrowing",
     note: "Owed by the household",
     isLiability: true,
   },
-  {
-    type: "EXTERNAL",
+  EXTERNAL: {
+    order: 4,
     label: "Outside world",
     note: "Counterparties — never part of household value",
     isLiability: false,
   },
-];
+};
 
 function AccountBalances({ snapshot }: { snapshot: PortfolioSnapshot }) {
-  const groups = ACCOUNT_GROUPS.filter(
-    (group) => snapshot.balancesByType[group.type].length > 0,
-  );
+  const groups = (
+    Object.entries(ACCOUNT_GROUPS) as [AccountType, AccountGroupMeta][]
+  )
+    .filter(([type]) => snapshot.balancesByType[type].length > 0)
+    .sort(([, a], [, b]) => a.order - b.order);
 
   return (
     <section className="flex min-w-0 flex-col gap-6">
@@ -349,8 +390,8 @@ function AccountBalances({ snapshot }: { snapshot: PortfolioSnapshot }) {
         <span className="text-sm text-muted">Derived by ledger replay</span>
       </div>
 
-      {groups.map((group) => (
-        <div key={group.type} className="flex min-w-0 flex-col gap-3">
+      {groups.map(([type, group]) => (
+        <div key={type} className="flex min-w-0 flex-col gap-3">
           <div className="flex flex-wrap items-baseline gap-2">
             <h3 className="text-sm font-medium text-foreground">{group.label}</h3>
             {group.isLiability ? (
@@ -361,7 +402,7 @@ function AccountBalances({ snapshot }: { snapshot: PortfolioSnapshot }) {
             <span className="text-sm text-muted">{group.note}</span>
           </div>
           <div className="grid min-w-0 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {snapshot.balancesByType[group.type].map((row) => (
+            {snapshot.balancesByType[type].map((row) => (
               <BalanceCard
                 key={row.accountId}
                 row={row}

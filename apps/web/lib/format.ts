@@ -17,6 +17,13 @@
 export const UNKNOWN = "N/A";
 
 /**
+ * The one display locale. Named so that a server render and the client render
+ * that hydrates it cannot disagree — `NumberValue` otherwise falls back to the
+ * nearest `I18nProvider` or the runtime default, which differ between the two.
+ */
+export const DISPLAY_LOCALE = "en-CA";
+
+/**
  * Format ledger minors as a currency string using only string/bigint
  * arithmetic (never `Number(...)` on the money value).
  */
@@ -43,13 +50,13 @@ export function formatMoney(minor: string, currency: string, minorUnits = 2): st
   const signedNumber = `${negative ? "-" : ""}${absolute}`;
 
   try {
-    const currencySample = new Intl.NumberFormat("en-CA", {
+    const currencySample = new Intl.NumberFormat(DISPLAY_LOCALE, {
       style: "currency",
       currency,
       minimumFractionDigits: scale,
       maximumFractionDigits: scale,
     }).format(0);
-    const numberSample = new Intl.NumberFormat("en-CA", {
+    const numberSample = new Intl.NumberFormat(DISPLAY_LOCALE, {
       minimumFractionDigits: scale,
       maximumFractionDigits: scale,
     }).format(0);
@@ -67,6 +74,22 @@ export function formatMoney(minor: string, currency: string, minorUnits = 2): st
   } catch {
     return `${signedNumber} ${currency}`;
   }
+}
+
+/**
+ * Format a reporting-currency amount whose minor-unit scale may be unknown.
+ *
+ * Returns the `UNKNOWN` marker rather than falling back to two decimals: the
+ * scale places the decimal point, so guessing it does not produce a
+ * badly-formatted number, it produces a different number (150000 minor units
+ * is ¥150,000 at scale 0 and ¥1,500.00 at scale 2).
+ */
+export function formatReportingMoney(
+  minor: string,
+  currency: string,
+  minorUnits: number | null,
+): string {
+  return minorUnits == null ? UNKNOWN : formatMoney(minor, currency, minorUnits);
 }
 
 /**
@@ -92,7 +115,7 @@ export function minorToDisplayNumber(minor: string, minorUnits: number): number 
  * that produced its input. No currency symbol: the axis is labelled with its
  * currency once, rather than on every tick.
  */
-export function formatCompactNumber(value: number, locale = "en-CA"): string {
+export function formatCompactNumber(value: number, locale = DISPLAY_LOCALE): string {
   try {
     return new Intl.NumberFormat(locale, {
       notation: "compact",

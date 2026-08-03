@@ -4,10 +4,8 @@ import {
   derivePortfolioSnapshot,
   type AccountMeta,
 } from "@/lib/portfolio-derive";
-import {
-  emptyPortfolioSnapshot,
-  reportingMinorUnits,
-} from "@/lib/portfolio-shared";
+import { emptyPortfolioSnapshot } from "@/lib/portfolio-shared";
+import { UNKNOWN, formatReportingMoney } from "@/lib/format";
 
 /**
  * All expected values in this file are hand-calculated from the journals
@@ -321,14 +319,27 @@ describe("derivePortfolioSnapshot open items", () => {
 });
 
 describe("reportingMinorUnits", () => {
-  it("reads the scale off an account held in the reporting currency", () => {
-    expect(reportingMinorUnits(snapshot())).toBe(2);
+  it("is the scale carried by an account in the reporting currency", () => {
+    expect(snapshot().reportingMinorUnits).toBe(2);
   });
 
-  it("returns a zero-decimal scale for a JPY-reporting household", () => {
+  it("prefers the scale supplied by the caller over the inferred one", () => {
+    // `lib/portfolio.ts` reads this straight from the `currency` table.
+    const derived = derivePortfolioSnapshot({
+      householdId: "hh-1",
+      reportingCurrency: "CAD",
+      reportingMinorUnits: 2,
+      accounts: CAD_ACCOUNTS,
+      journals: BASE_JOURNALS,
+    });
+    expect(derived.reportingMinorUnits).toBe(2);
+  });
+
+  it("derives a zero-decimal scale for a JPY-reporting household", () => {
     const jpy = derivePortfolioSnapshot({
       householdId: "hh-jpy",
       reportingCurrency: "JPY",
+      reportingMinorUnits: 0,
       accounts: [
         { id: "cash", name: "Cash", type: "CASH", currency: "JPY", minorUnits: 0 },
         { id: "world", name: "Outside", type: "EXTERNAL", currency: "JPY", minorUnits: 0 },
@@ -349,15 +360,52 @@ describe("reportingMinorUnits", () => {
       ],
     });
 
-    expect(reportingMinorUnits(jpy)).toBe(0);
+    expect(jpy.reportingMinorUnits).toBe(0);
     // 1,500 JPY minor units are 1,500 yen: a zero-decimal currency.
     expect(jpy.netWorthMinor).toBe("1500");
+    expect(formatReportingMoney(jpy.netWorthMinor, "JPY", jpy.reportingMinorUnits)).toBe(
+      "JP¥1,500",
+    );
   });
 
-  it("falls back to two decimals when no account holds the reporting currency", () => {
+  it("is null when no account is held in the reporting currency and none is supplied", () => {
+    // A JPY-reporting household posting only in USD. `sumTotals` excludes the
+    // USD balance from the totals, but an ACB cost is a reporting-currency
+    // amount regardless, so there is no scale to infer and none may be
+    // guessed: two decimals would render 150000 as ¥1,500.00, not ¥150,000.
+    const noMatch = derivePortfolioSnapshot({
+      householdId: "hh-jpy-usd",
+      reportingCurrency: "JPY",
+      accounts: [
+        { id: "cash", name: "Cash", type: "CASH", currency: "USD", minorUnits: 2 },
+        { id: "world", name: "Outside", type: "EXTERNAL", currency: "USD", minorUnits: 2 },
+      ],
+      journals: [
+        {
+          id: "j-usd-deposit",
+          type: "DEPOSIT",
+          tradeDate: "2024-03-01",
+          sortKey: 0,
+          status: "POSTED",
+          source: "MANUAL",
+          postings: [
+            { accountId: "cash", amount: money("USD", 100_00n) },
+            { accountId: "world", amount: money("USD", -100_00n) },
+          ],
+        },
+      ],
+    });
+
+    expect(noMatch.reportingMinorUnits).toBeNull();
+    expect(formatReportingMoney("150000", "JPY", noMatch.reportingMinorUnits)).toBe(
+      UNKNOWN,
+    );
+  });
+
+  it("is null on a snapshot with nothing derived", () => {
     const empty = emptyPortfolioSnapshot({ reportingCurrency: "CAD" });
-    expect(reportingMinorUnits(empty)).toBe(2);
-    // The fallback never scales a real figure: there is nothing to total.
+    expect(empty.reportingMinorUnits).toBeNull();
+    // Nothing to scale either: there are no totals to state.
     expect(empty.netWorthMinor).toBe("0");
   });
 });
