@@ -1,4 +1,4 @@
-import type { AccountType } from "@stonks/ledger";
+import type { AccountType, TaxFlag } from "@stonks/ledger";
 
 /**
  * Snapshot types shared between the server read model (`lib/portfolio.ts`,
@@ -45,10 +45,104 @@ export type PositionRow = {
   costIsUnknown: boolean;
 };
 
-/** Counts backing the open-items badge. Task 4 adds further categories. */
+/**
+ * One position's share of the portfolio, in integer basis points.
+ *
+ * The shares are of **cost**, not market value: there is no price source
+ * wired into the read model yet, so a market-value split cannot be derived
+ * honestly. `PortfolioSnapshot.allocationBasis` names the basis so this can
+ * never be read as a market-value split by mistake.
+ */
+export type AllocationRow = {
+  /** `accountId:securityId`, the ledger's position key. */
+  key: string;
+  accountId: string;
+  securityId: string;
+  symbol: string;
+  /** The weight this share was computed from: ACB cost, minor units. */
+  costReportingMinor: string;
+  /** Integer basis points. Across `allocation` these sum to exactly 10000. */
+  bps: number;
+};
+
+/** What `allocation` divides up. Only cost is derivable today. */
+export type AllocationBasis = "COST";
+
+/** One month-end point of the value series. */
+export type ValuePoint = {
+  /** Calendar month, `YYYY-MM`. */
+  month: string;
+  /**
+   * Reporting-currency net worth at that month end, minor units — derived by
+   * replaying every journal up to the month end, not by accumulating deltas.
+   */
+  valueMinor: string;
+  /**
+   * True when a balance was excluded from this point for want of an FX rate,
+   * exactly as `PortfolioSnapshot.totalsAreUncertain` does for the totals.
+   */
+  isUncertain: boolean;
+};
+
+/**
+ * Data-quality findings the read model can derive from the ledger itself.
+ *
+ * The set is deliberately limited to kinds derivable from posted journals and
+ * account metadata. Interest variance needs facility terms and a benchmark
+ * rate curve, and statement reconciliation needs imported statements; neither
+ * reaches the pure derivation, so neither is invented here.
+ */
+export type OpenItemKind = "UNKNOWN_COST_BASIS" | "MISSING_FX_RATE";
+
+export type OpenItemSeverity = "INFO" | "WARNING" | "ERROR";
+
+/** What an open item traces back to, so every finding stays auditable. */
+export type OpenItemRefType = "POSITION" | "ACCOUNT" | "JOURNAL";
+
+export type OpenItem = {
+  kind: OpenItemKind;
+  severity: OpenItemSeverity;
+  message: string;
+  refType: OpenItemRefType;
+  /** Position key, account id or journal id, per `refType`. */
+  refId: string;
+};
+
+/** Counts backing the open-items badge; `total` is `openItems.length`. */
 export type OpenItemCounts = {
   unknownCost: number;
+  missingFxRate: number;
   total: number;
+};
+
+/**
+ * A Canadian tax-year summary, straight from the ledger's
+ * `summarizeCanadaTaxYear` with its bigints rendered as minor-unit strings.
+ *
+ * `flags` is carried through unchanged: flags are informational and are never
+ * silently applied to the figures above them.
+ */
+export type TaxSummary = {
+  jurisdiction: "CA";
+  year: number;
+  realizedGainsMinor: string;
+  realizedLossesMinor: string;
+  taxableCapitalGainsMinor: string;
+  inclusionRateBps: number;
+  dividendIncomeMinor: string;
+  interestIncomeMinor: string;
+  deductibleInterestExpenseMinor: string;
+  flags: TaxFlag[];
+  disclaimer: string;
+  /**
+   * True when an input to the year could not be derived — an interest charge
+   * with no use attribution, a realized gain with an unknown cost basis, or an
+   * amount in a currency with no rate. The figures then omit that input rather
+   * than guessing at it.
+   */
+  isUncertain: boolean;
+  /** One human-readable reason per omission, naming the journal involved. */
+  uncertaintyReasons: string[];
 };
 
 export type PortfolioSnapshot = {
@@ -77,7 +171,24 @@ export type PortfolioSnapshot = {
    * can say so instead of showing a number that quietly omits them.
    */
   totalsAreUncertain: boolean;
+  /**
+   * Per-position shares of **cost**, summing to exactly 10000 basis points.
+   * Read `allocationBasis` before labelling this in the UI.
+   */
+  allocation: AllocationRow[];
+  allocationBasis: AllocationBasis;
+  /**
+   * True when a position was left out of `allocation` because its cost is not
+   * known. The remaining rows still sum to 10000, but they describe less than
+   * the whole portfolio.
+   */
+  allocationIsIncomplete: boolean;
+  /** Month-end net worth, oldest first, one point per calendar month. */
+  valueOverTime: ValuePoint[];
+  openItems: OpenItem[];
   openItemCounts: OpenItemCounts;
+  /** `null` when there is no posted activity to summarize. */
+  taxSummary: TaxSummary | null;
   message?: string | undefined;
 };
 
@@ -110,7 +221,13 @@ export function emptyPortfolioSnapshot(
     totalInvestedMinor: "0",
     totalBorrowedMinor: "0",
     totalsAreUncertain: false,
-    openItemCounts: { unknownCost: 0, total: 0 },
+    allocation: [],
+    allocationBasis: "COST",
+    allocationIsIncomplete: false,
+    valueOverTime: [],
+    openItems: [],
+    openItemCounts: { unknownCost: 0, missingFxRate: 0, total: 0 },
+    taxSummary: null,
   };
 }
 

@@ -10,10 +10,18 @@ import { derivePortfolioSnapshot, type AccountMeta } from "@/lib/portfolio-deriv
 import { emptyPortfolioSnapshot, type PortfolioSnapshot } from "@/lib/portfolio-shared";
 
 export type {
+  AllocationBasis,
+  AllocationRow,
   BalanceRow,
+  OpenItem,
   OpenItemCounts,
+  OpenItemKind,
+  OpenItemRefType,
+  OpenItemSeverity,
   PortfolioSnapshot,
   PositionRow,
+  TaxSummary,
+  ValuePoint,
 } from "@/lib/portfolio-shared";
 export { formatMoney } from "@/lib/portfolio-shared";
 
