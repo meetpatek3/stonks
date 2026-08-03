@@ -183,15 +183,7 @@ export function Dashboard({ snapshot }: DashboardProps) {
         </KPI>
       </KPIGroup>
 
-      {snapshot.valuation.uncertaintyReasons.length > 0 ? (
-        <UncertaintyNote status="accent" title="The return above is incomplete">
-          <ul className="flex list-disc flex-col gap-1 pl-4">
-            {snapshot.valuation.uncertaintyReasons.map((reason) => (
-              <li key={reason}>{reason}</li>
-            ))}
-          </ul>
-        </UncertaintyNote>
-      ) : null}
+      <ValuationNote valuation={snapshot.valuation} />
 
       <section className="grid min-w-0 items-start gap-4 lg:grid-cols-3">
         <div className="min-w-0 lg:col-span-2">
@@ -288,6 +280,42 @@ function ReturnKPI({
         </span>
       </KPI.Footer>
     </KPI>
+  );
+}
+
+/**
+ * What qualifies the return above, titled by cause.
+ *
+ * Incompleteness and staleness are different claims and must not share a
+ * banner: a figure derived from Friday's close on a Sunday is whole, just not
+ * current, and telling the user it is incomplete is the same mislabelling the
+ * staleness rule exists to prevent, one layer up. Incompleteness wins when
+ * both apply — a missing input is the more serious of the two, and the stale
+ * holdings are listed underneath it rather than in a second banner.
+ */
+function ValuationNote({ valuation }: { valuation: ValuationSummary }) {
+  const incomplete = valuation.uncertaintyReasons.length > 0;
+  const reasons = incomplete
+    ? [...valuation.uncertaintyReasons, ...valuation.staleReasons]
+    : valuation.staleReasons;
+
+  if (reasons.length === 0) return null;
+
+  return (
+    <UncertaintyNote
+      status="accent"
+      title={
+        incomplete
+          ? "The return above is incomplete"
+          : "Marked at prices older than today"
+      }
+    >
+      <ul className="flex list-disc flex-col gap-1 pl-4">
+        {reasons.map((reason) => (
+          <li key={reason}>{reason}</li>
+        ))}
+      </ul>
+    </UncertaintyNote>
   );
 }
 

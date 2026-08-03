@@ -419,17 +419,20 @@ function deriveValuation(args: {
   const priceBySecurity = new Map(prices.map((price) => [price.securityId, price]));
   const heldKeys = new Set(core.map((position) => position.key));
   const interest = attributeInterest(journals, ledgerAccounts, reportingCurrency, heldKeys);
-  const fees = sumFees(journals, reportingCurrency);
+  const fees = sumFees(journals, ledgerAccounts, reportingCurrency);
   const describe = (minor: bigint) =>
     describeMoney(minor, reportingCurrency, reportingMinorUnits);
 
   const positions: PositionRow[] = [];
   /** Reasons that also make a *portfolio* figure incomplete. */
   const sharedReasons: string[] = [];
+  /** Staleness, kept apart: it dates a figure, it does not leave one out. */
+  const staleReasons: string[] = [];
 
   for (const position of core) {
     const local: string[] = [];
     const shared: string[] = [];
+    const stale: string[] = [];
     const resolved = priceBySecurity.get(position.securityId);
     const mark = usableMark(resolved);
 
@@ -442,13 +445,18 @@ function deriveValuation(args: {
               `and no return on it can be stated.`,
       );
     } else if (mark.stale) {
-      shared.push(
+      stale.push(
         `${position.symbol} is marked at its ${mark.asOf} price, not at a price ` +
           `for ${mark.requestedAsOf}; every figure derived from it is as of that ` +
           `earlier date.`,
       );
     }
 
+    // `mulDivFloor` throws on a negative operand, and is safe here only
+    // because both are guaranteed non-negative: `usableMark` refuses a
+    // negative price, and `applyPostingQuantities` refuses a negative
+    // quantity outright, so a holding cannot be short. Floored to whole minor
+    // units, the direction the ledger's own cost allocation rounds.
     const marketValueTrade =
       mark === undefined
         ? null
@@ -485,10 +493,12 @@ function deriveValuation(args: {
       );
     } else if (cost <= 0n && marketValue !== null) {
       // A gift or zero-basis spinoff: the gain is real, the return is not a
-      // number. Local only — the portfolio has other holdings to divide by.
+      // number. Local, because the portfolio usually has other holdings to
+      // divide by — where it does not, `summarizeValuation` raises its own
+      // reason rather than leaving the portfolio return null and unexplained.
       local.push(
-        `${position.symbol} has a recorded cost of zero, so it has no basis to ` +
-          `state a return on even though its gain is known.`,
+        `${position.symbol} has a recorded cost of zero or less, so it has no ` +
+          `basis to state a return on even though its gain is known.`,
       );
     }
 
@@ -512,8 +522,11 @@ function deriveValuation(args: {
         ? gain - interestCost - feeCost
         : null;
 
-    const reasons = [...shared, ...local];
+    // The row itself is qualified by all three: a holding marked at an old
+    // price *is* uncertain, even though the portfolio total it feeds is whole.
+    const reasons = [...shared, ...local, ...stale];
     sharedReasons.push(...shared);
+    staleReasons.push(...stale);
 
     positions.push({
       ...position,
@@ -541,9 +554,11 @@ function deriveValuation(args: {
     valuation: summarizeValuation({
       positions,
       sharedReasons,
+      staleReasons,
       interest,
       fees,
-      pricedAsOf: prices[0]?.requestedAsOf ?? null,
+      describe,
+      pricedAsOf: valuationDate(prices, core),
     }),
   };
 }
@@ -561,11 +576,13 @@ function deriveValuation(args: {
 function summarizeValuation(args: {
   positions: readonly PositionRow[];
   sharedReasons: readonly string[];
+  staleReasons: readonly string[];
   interest: InterestAttribution;
   fees: FeeAttribution;
+  describe: (minor: bigint) => string;
   pricedAsOf: string | null;
 }): ValuationSummary {
-  const { positions, sharedReasons, interest, fees, pricedAsOf } = args;
+  const { positions, sharedReasons, interest, fees, describe, pricedAsOf } = args;
 
   const reasons = [...new Set(sharedReasons)];
 
@@ -582,6 +599,16 @@ function summarizeValuation(args: {
   if (positions.length === 0) {
     reasons.push(
       "There are no holdings, so there is no cost basis to state a return on.",
+    );
+  } else if (cost !== null && cost <= 0n) {
+    // Every holding is a gift or a zero-basis spinoff. `returnBps` refuses the
+    // division, and without this the portfolio return would be `null` with
+    // nothing on the page saying why — the per-holding reason for this is
+    // deliberately local, and there is no *other* holding to carry a shared one.
+    reasons.push(
+      `The portfolio's whole cost basis is ${describe(cost)}, so there is no ` +
+        `basis to state a return on even though the holdings and their gain are ` +
+        `real.`,
     );
   }
 
@@ -613,7 +640,29 @@ function summarizeValuation(args: {
     hasStalePrice,
     isUncertain: reasons.length > 0 || hasStalePrice,
     uncertaintyReasons: reasons,
+    staleReasons: [...new Set(args.staleReasons)],
   };
+}
+
+/**
+ * The date the portfolio is valued at.
+ *
+ * Taken from the prices for securities the household actually **holds** — an
+ * entry for anything else says nothing about this portfolio — and, where those
+ * disagree, the *earliest* of them: a set of figures is only as current as its
+ * oldest input. Reading `prices[0]` instead would make the answer depend on
+ * the order the caller happened to build its array in.
+ */
+function valuationDate(
+  prices: readonly ResolvedPrice[],
+  core: readonly PositionCore[],
+): string | null {
+  const held = new Set(core.map((position) => position.securityId));
+  const dates = prices
+    .filter((price) => held.has(price.securityId))
+    .map((price) => price.requestedAsOf)
+    .sort();
+  return dates[0] ?? null;
 }
 
 /** A resolved price narrowed to one that can actually serve as a mark. */
@@ -721,6 +770,13 @@ function attributeInterest(
     return { byKey: new Map(), totalMinor: 0n, strandedMinor: 0n, blockingReasons };
   }
 
+  // PERFORMANCE: `attributeInvestmentInterest` replays full position state
+  // once per calendar day of the ledger's span — O(days x journals), so a
+  // five-year ledger costs roughly 1,800 replays per uncached snapshot. It is
+  // reached only when investment interest is non-zero, and
+  // `getPortfolioSnapshot` is `React.cache`-wrapped so it runs once per
+  // request. The fix is an incremental dollar-days accumulator in
+  // `packages/ledger`; this is the most expensive thing in the read model.
   const { allocations, unallocatedMinor } = attributeInvestmentInterest({
     journals: posted,
     accounts: ledgerAccounts,
@@ -745,7 +801,7 @@ function attributeInterest(
 type FeeAttribution = {
   /** Fees per position key, or `null` when a fee is not derivable at all. */
   byKey: Map<string, bigint> | null;
-  /** Every fee the household paid in the reporting currency, or `null`. */
+  /** Every *investment* fee in the reporting currency, or `null`. See `sumFees`. */
   totalMinor: bigint | null;
   /** The share of `totalMinor` that names no holding. */
   unattributedMinor: bigint;
@@ -753,16 +809,30 @@ type FeeAttribution = {
 };
 
 /**
- * Fees, and the share of them that belongs to a named holding.
+ * **Investment** fees, and the share of them that belongs to a named holding.
  *
- * A fee is what left a household account, so it is read off the non-EXTERNAL
- * legs (the EXTERNAL leg is the party charging it). A leg that names a
- * security belongs to that holding; an account-level fee belongs to no
- * holding, and is counted across the portfolio rather than spread over
- * holdings by a rule the ledger never stated.
+ * Three filters, each doing what it says:
+ *
+ * 1. **A cost of investing, not of banking.** A chequing account's monthly
+ *    maintenance fee is a real cost, but it is not a cost of the investment
+ *    programme and subtracting it would understate the return on the
+ *    portfolio. Counted only on an INVESTMENT account, or on any household
+ *    account when the leg names a security — a commission settled out of cash
+ *    is an investment cost wherever it was paid from.
+ * 2. **A household leg, not the counterparty's.** The EXTERNAL leg is whoever
+ *    charged the fee. Without this test a *rebate* — money coming back, so the
+ *    negative leg is the EXTERNAL one — would be counted as a second cost.
+ * 3. **An outflow.** The positive leg of a charge is the receiver, not a
+ *    second fee. Checked before the currency test so one foreign-currency
+ *    charge raises one reason rather than one per leg.
+ *
+ * A leg that names a security belongs to that holding; an account-level
+ * investment fee belongs to no single holding, and is counted across the
+ * portfolio rather than spread over holdings by a rule the ledger never stated.
  */
 function sumFees(
   journals: readonly Journal[],
+  ledgerAccounts: ReadonlyMap<string, Account>,
   reportingCurrency: string,
 ): FeeAttribution {
   const byKey = new Map<string, bigint>();
@@ -774,11 +844,12 @@ function sumFees(
     if (journal.type !== "FEE") continue;
 
     for (const posting of journal.postings) {
-      // A fee reduces a household account, so its cost is the negated outflow;
-      // the positive leg is the counterparty receiving it, and is not a second
-      // fee. Tested for first so a foreign-currency charge raises one reason
-      // rather than one per leg of the same journal.
       if (posting.amount.minor >= 0n) continue;
+
+      const accountType = ledgerAccounts.get(posting.accountId)?.type;
+      if (accountType === undefined || accountType === "EXTERNAL") continue;
+      if (accountType !== "INVESTMENT" && posting.securityId === undefined) continue;
+
       if (posting.amount.currency !== reportingCurrency) {
         blockingReasons.push(
           `${journal.id}: the fee is in ${posting.amount.currency} and no rate is ` +

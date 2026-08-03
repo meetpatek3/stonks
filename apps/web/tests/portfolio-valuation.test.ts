@@ -252,9 +252,40 @@ describe("position valuation", () => {
   });
 
   it("keeps a portfolio-level fee out of a holding's net return and says so", () => {
-    // An account fee names no security, so no holding can honestly carry it.
+    // An investment-account fee names no security, so no holding can honestly
+    // carry it — but it is unmistakably a cost of the investment programme.
     const fee: Journal = {
       id: "j-fee-account",
+      type: "FEE",
+      tradeDate: "2024-03-02",
+      sortKey: 1,
+      status: "POSTED",
+      source: "MANUAL",
+      postings: [
+        { accountId: "brokerage", amount: money("CAD", -5_000n) },
+        { accountId: "world", amount: money("CAD", 5_000n) },
+      ],
+    };
+
+    const snapshot = derive([...BASE_JOURNALS, fee], [quote("XEQT", 3_000n)]);
+    const xeqt = positionFor(snapshot, "brokerage:XEQT");
+
+    expect(xeqt.feeCostMinor).toBe("0");
+    expect(xeqt.valuationIsUncertain).toBe(true);
+    expect(xeqt.valuationUncertaintyReasons.join(" ")).toContain("50.00");
+
+    // The portfolio figure carries every investment fee, so the headline stays
+    // complete: (50000 - 10000 - 5000) * 10000 / 400000 = 875 bps
+    expect(snapshot.valuation.feeCostMinor).toBe("5000");
+    expect(snapshot.valuation.netReturnBps).toBe(875);
+  });
+
+  it("does not treat a banking fee as a cost of the investment programme", () => {
+    // A chequing maintenance fee is a real cost and an honest ledger entry,
+    // but subtracting it from the portfolio return would understate how the
+    // investments themselves did.
+    const fee: Journal = {
+      id: "j-fee-chequing",
       type: "FEE",
       tradeDate: "2024-03-02",
       sortKey: 1,
@@ -267,16 +298,33 @@ describe("position valuation", () => {
     };
 
     const snapshot = derive([...BASE_JOURNALS, fee], [quote("XEQT", 3_000n)]);
-    const xeqt = positionFor(snapshot, "brokerage:XEQT");
 
-    expect(xeqt.feeCostMinor).toBe("0");
-    expect(xeqt.valuationIsUncertain).toBe(true);
-    expect(xeqt.valuationUncertaintyReasons.join(" ")).toContain("50.00");
+    expect(snapshot.valuation.feeCostMinor).toBe("0");
+    expect(snapshot.valuation.netReturnBps).toBe(1000);
+    // Nothing was excluded from the holding either, so nothing to explain.
+    expect(positionFor(snapshot, "brokerage:XEQT").valuationIsUncertain).toBe(false);
+  });
 
-    // The portfolio figure carries every fee, so the headline stays complete:
-    // (50000 - 10000 - 5000) * 10000 / 400000 = 875 bps
-    expect(snapshot.valuation.feeCostMinor).toBe("5000");
-    expect(snapshot.valuation.netReturnBps).toBe(875);
+  it("does not read a fee rebate as a second fee", () => {
+    // Money coming back: the negative leg is the counterparty's, and counting
+    // it would turn a refund into a cost.
+    const rebate: Journal = {
+      id: "j-fee-rebate",
+      type: "FEE",
+      tradeDate: "2024-03-02",
+      sortKey: 1,
+      status: "POSTED",
+      source: "MANUAL",
+      postings: [
+        { accountId: "brokerage", amount: money("CAD", 2_000n) },
+        { accountId: "world", amount: money("CAD", -2_000n) },
+      ],
+    };
+
+    const snapshot = derive([...BASE_JOURNALS, rebate], [quote("XEQT", 3_000n)]);
+
+    expect(snapshot.valuation.feeCostMinor).toBe("0");
+    expect(snapshot.valuation.netReturnBps).toBe(1000);
   });
 });
 
@@ -343,6 +391,13 @@ describe("valuation uncertainty", () => {
     expect(snapshot.valuation.hasStalePrice).toBe(true);
     expect(snapshot.valuation.isUncertain).toBe(true);
     expect(snapshot.valuation.netReturnBps).toBe(1000);
+
+    // Stale is not incomplete. Every weekend every holding is marked at
+    // Friday's close; the portfolio figures are whole, just not current, and
+    // the two claims must not share a channel.
+    expect(snapshot.valuation.uncertaintyReasons).toEqual([]);
+    expect(snapshot.valuation.staleReasons).toHaveLength(1);
+    expect(snapshot.valuation.staleReasons[0]).toContain("2024-02-28");
   });
 
   it("values a holding with an unknown cost basis but states no return on it", () => {
@@ -504,6 +559,42 @@ describe("valuation uncertainty", () => {
     expect(snapshot.valuation.marketValueMinor).toBe("455000");
     expect(snapshot.valuation.unrealizedGainMinor).toBe("55000");
     expect(snapshot.valuation.netReturnBps).toBe(1125);
+  });
+
+  it("says why the portfolio return is null when every holding is zero-cost", () => {
+    // A household whose only holding is a gift. Both returns are null because
+    // there is nothing to divide by — and with no *other* holding to carry the
+    // explanation, the portfolio has to state it itself or the dashboard shows
+    // an unexplained blank.
+    const gift: Journal = {
+      id: "j-gift-only",
+      type: "BUY",
+      tradeDate: "2024-01-03",
+      sortKey: 0,
+      status: "POSTED",
+      source: "MANUAL",
+      postings: [
+        {
+          accountId: "brokerage",
+          amount: money("CAD", 0n),
+          quantity: qtyFromDecimalString("5"),
+          securityId: "GIFT",
+          tradeCurrency: "CAD",
+          tradeAmountMinor: 0n,
+        },
+        { accountId: "world", amount: money("CAD", 0n) },
+      ],
+    };
+
+    const { valuation } = derive([deposit, gift], [quote("GIFT", 1_000n)]);
+
+    expect(valuation.marketValueMinor).toBe("5000");
+    expect(valuation.costBasisMinor).toBe("0");
+    expect(valuation.unrealizedGainMinor).toBe("5000");
+    expect(valuation.grossReturnBps).toBeNull();
+    expect(valuation.netReturnBps).toBeNull();
+    expect(valuation.isUncertain).toBe(true);
+    expect(valuation.uncertaintyReasons.join(" ")).toContain("no basis");
   });
 });
 

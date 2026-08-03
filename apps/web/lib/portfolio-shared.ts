@@ -83,7 +83,15 @@ export type PositionRow = {
   feeCostMinor: string | null;
   /** Return before financing and costs: gain / cost, integer basis points. */
   grossReturnBps: number | null;
-  /** Return after attributed interest and fees. The headline figure. */
+  /**
+   * Return after the interest and fees attributable to **this holding**.
+   *
+   * Not the headline figure: a fee that names no holding cannot honestly be
+   * split across holdings, so it is excluded here and counted only in
+   * `PortfolioSnapshot.valuation.netReturnBps`, which is the figure that is
+   * net of every cost. When that applies, `valuationUncertaintyReasons` says
+   * so by amount.
+   */
   netReturnBps: number | null;
 
   /** True when any figure above is missing, stale, or incomplete. */
@@ -233,8 +241,23 @@ export type ValuationSummary = {
   pricedAsOf: string | null;
   /** True when at least one holding is marked at a price older than that date. */
   hasStalePrice: boolean;
+  /**
+   * True when a figure above is missing *or* is derived from a stale price —
+   * the union of the two conditions below, for a caller that only needs to
+   * know whether anything at all qualifies these numbers.
+   */
   isUncertain: boolean;
+  /**
+   * Why a figure above is `null`. **Incompleteness only.**
+   *
+   * Staleness is deliberately not in here: a stale mark makes the return older
+   * than today, not incomplete, and folding the two together would have every
+   * weekend claim the headline figure was missing something when it is whole.
+   * Read `staleReasons` for that, and never label the two the same way.
+   */
   uncertaintyReasons: string[];
+  /** One reason per holding marked at a price older than `pricedAsOf`. */
+  staleReasons: string[];
 };
 
 export type PortfolioSnapshot = {
@@ -332,6 +355,7 @@ export function emptyValuation(): ValuationSummary {
     hasStalePrice: false,
     isUncertain: false,
     uncertaintyReasons: [],
+    staleReasons: [],
   };
 }
 
