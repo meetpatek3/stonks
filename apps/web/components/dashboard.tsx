@@ -10,6 +10,7 @@ import Link from "next/link";
 import {
   DISPLAY_LOCALE,
   UNKNOWN,
+  formatBps,
   formatMoney,
   formatReportingMoney,
   minorToDisplayNumber,
@@ -19,6 +20,7 @@ import type { AccountType } from "@stonks/ledger";
 import type {
   BalanceRow,
   PortfolioSnapshot,
+  ValuationSummary,
   ValuePoint,
 } from "@/lib/portfolio-shared";
 import {
@@ -148,23 +150,11 @@ export function Dashboard({ snapshot }: DashboardProps) {
           </KPI.Footer>
         </KPI>
 
-        <KPI>
-          <KPI.Header>
-            <KPI.Title>Return, net of all costs</KPI.Title>
-            <KPI.Icon>
-              <Icon icon="gravity-ui:percent" width={18} />
-            </KPI.Icon>
-          </KPI.Header>
-          <KPI.Content>
-            <p className="text-3xl font-semibold tracking-tight tabular-nums text-muted">
-              {UNKNOWN}
-            </p>
-            <TrendChip trend="neutral">Not derivable</TrendChip>
-          </KPI.Content>
-          <KPI.Footer>
-            <span className="text-sm text-muted">Needs market prices</span>
-          </KPI.Footer>
-        </KPI>
+        <ReturnKPI
+          valuation={snapshot.valuation}
+          currency={currency}
+          minorUnits={minorUnits}
+        />
 
         <KPI>
           <KPI.Header>
@@ -193,14 +183,15 @@ export function Dashboard({ snapshot }: DashboardProps) {
         </KPI>
       </KPIGroup>
 
-      <UncertaintyNote status="accent" title="Returns are not derivable yet">
-        A return on this screen would be stated net of all costs, with the gross
-        figure beside it. Neither is shown, because neither can be derived: a
-        period return needs the change in what the holdings are worth, and no
-        price source is wired in, so every position is carried at cost.
-        Borrowing costs are recorded — they are simply not enough on their own
-        to state a return.
-      </UncertaintyNote>
+      {snapshot.valuation.uncertaintyReasons.length > 0 ? (
+        <UncertaintyNote status="accent" title="The return above is incomplete">
+          <ul className="flex list-disc flex-col gap-1 pl-4">
+            {snapshot.valuation.uncertaintyReasons.map((reason) => (
+              <li key={reason}>{reason}</li>
+            ))}
+          </ul>
+        </UncertaintyNote>
+      ) : null}
 
       <section className="grid min-w-0 items-start gap-4 lg:grid-cols-3">
         <div className="min-w-0 lg:col-span-2">
@@ -247,6 +238,88 @@ export function Dashboard({ snapshot }: DashboardProps) {
       <AccountBalances snapshot={snapshot} />
     </Screen>
   );
+}
+
+/**
+ * The product's headline figure: return after every cost, including the cost
+ * of borrowed capital.
+ *
+ * Net is the number shown; gross sits beside it, labelled, so the two can
+ * never be read for one another. Both come from the read model — nothing is
+ * computed here — and both degrade to the `UNKNOWN` marker when an input is
+ * missing, with the reasons listed under the KPI row rather than summarized
+ * into a shrug. That path is still reachable: it now means a holding has no
+ * price, not that the product has no price source.
+ */
+function ReturnKPI({
+  valuation,
+  currency,
+  minorUnits,
+}: {
+  valuation: ValuationSummary;
+  currency: string;
+  minorUnits: number | null;
+}) {
+  const { netReturnBps: net, grossReturnBps: gross } = valuation;
+
+  return (
+    <KPI>
+      <KPI.Header>
+        <KPI.Title>Return, net of all costs</KPI.Title>
+        <KPI.Icon>
+          <Icon icon="gravity-ui:percent" width={18} />
+        </KPI.Icon>
+      </KPI.Header>
+      <KPI.Content>
+        <p
+          className={`text-3xl font-semibold tracking-tight tabular-nums ${
+            net === null ? "text-muted" : ""
+          }`}
+        >
+          {net === null ? UNKNOWN : formatBps(net)}
+        </p>
+        <TrendChip trend={gross === null ? "neutral" : bpsTrend(gross)}>
+          {gross === null ? "Gross not derivable" : `Gross ${formatBps(gross)}`}
+        </TrendChip>
+      </KPI.Content>
+      <KPI.Footer>
+        <span className="text-sm text-muted">
+          {returnFooter(valuation, currency, minorUnits)}
+        </span>
+      </KPI.Footer>
+    </KPI>
+  );
+}
+
+/**
+ * What the net return is net *of* — named, so "net of all costs" is a claim
+ * the user can check rather than take on trust. Says nothing about the costs
+ * when the return itself could not be derived: the reasons below the KPI row
+ * carry that.
+ */
+function returnFooter(
+  valuation: ValuationSummary,
+  currency: string,
+  minorUnits: number | null,
+): string {
+  const { netReturnBps, interestCostMinor, feeCostMinor } = valuation;
+  if (netReturnBps === null || interestCostMinor === null || feeCostMinor === null) {
+    return "Not derivable — see below";
+  }
+
+  const interest = formatReportingMoney(interestCostMinor, currency, minorUnits);
+  const fees = formatReportingMoney(feeCostMinor, currency, minorUnits);
+  const asOf = valuation.hasStalePrice
+    ? " · marked at prices older than today"
+    : "";
+  return `After ${interest} interest and ${fees} fees${asOf}`;
+}
+
+/** Basis points are a ratio, not money, so this is not `signedTrend`. */
+function bpsTrend(bps: number): "up" | "down" | "neutral" {
+  if (bps > 0) return "up";
+  if (bps < 0) return "down";
+  return "neutral";
 }
 
 /**

@@ -1,15 +1,24 @@
 import {
   account,
   createJournalRepo,
+  createPriceRepo,
   currency,
   eq,
   household,
   type Db,
 } from "@stonks/db";
+import type { Journal } from "@stonks/ledger";
 import { cache } from "react";
 import { getSession } from "@/lib/auth/session";
 import { getDb } from "@/lib/db";
-import { derivePortfolioSnapshot, type AccountMeta } from "@/lib/portfolio-derive";
+import { createQuoteFetcher } from "@/lib/market/provider";
+import { createPriceService, type ResolvedPrice } from "@/lib/market/price-service";
+import { loadSecurityRefs } from "@/lib/market/symbols";
+import {
+  derivePortfolioSnapshot,
+  heldSecurityIds,
+  type AccountMeta,
+} from "@/lib/portfolio-derive";
 import { emptyPortfolioSnapshot, type PortfolioSnapshot } from "@/lib/portfolio-shared";
 
 export type {
@@ -24,6 +33,7 @@ export type {
   PortfolioSnapshot,
   PositionRow,
   TaxSummary,
+  ValuationSummary,
   ValuePoint,
 } from "@/lib/portfolio-shared";
 export { formatMoney } from "@/lib/portfolio-shared";
@@ -94,7 +104,48 @@ async function loadPortfolioSnapshot(
     ...(reportingMinorUnits === undefined ? {} : { reportingMinorUnits }),
     accounts,
     journals,
+    prices: await resolveHeldPrices(db, householdId, journals),
   });
+}
+
+/**
+ * Market prices for the securities still held, as of today.
+ *
+ * This is the asynchronous, I/O half of valuation, kept out of the pure
+ * derivation: prices arrive as data, so the read model stays synchronous and
+ * unit-testable. Only held securities are priced — a holding sold years ago
+ * would otherwise spend an API request on every page load, forever.
+ *
+ * Nothing here is allowed to fail a render. A database or provider failure
+ * degrades to no prices, which the read model states as "carried at cost"
+ * rather than as a number.
+ */
+async function resolveHeldPrices(
+  db: Db,
+  householdId: string,
+  journals: readonly Journal[],
+): Promise<ResolvedPrice[]> {
+  const securityIds = heldSecurityIds(journals);
+  if (securityIds.length === 0) return [];
+
+  // UTC, matching the dates the ledger and the quote tables are keyed on. A
+  // household west of Greenwich asking late in the evening asks for a date
+  // whose close does not exist yet, and gets the previous close back marked
+  // stale — visibly a day behind, never silently relabelled as today's.
+  const asOf = new Date().toISOString().slice(0, 10);
+
+  try {
+    const securities = await loadSecurityRefs(db, securityIds, asOf);
+    if (securities.length === 0) return [];
+
+    const service = createPriceService({
+      repo: createPriceRepo(db),
+      fetcher: createQuoteFetcher(),
+    });
+    return await service.resolvePrices({ householdId, securities, asOf });
+  } catch {
+    return [];
+  }
 }
 
 /**

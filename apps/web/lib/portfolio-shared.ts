@@ -1,4 +1,7 @@
 import type { AccountType, TaxFlag } from "@stonks/ledger";
+import type { PriceSource } from "@/lib/market/price-service";
+
+export type { PriceSource };
 
 /**
  * Snapshot types shared between the server read model (`lib/portfolio.ts`,
@@ -43,6 +46,50 @@ export type PositionRow = {
   costReportingMinor: string | null;
   /** Driven by the ledger's `isUnknownCost` on the position's cost state. */
   costIsUnknown: boolean;
+
+  /* --- Valuation. A field below is `null` when it is not derivable, with --- */
+  /* --- the reason in `valuationUncertaintyReasons` — never a `"0"` that  --- */
+  /* --- would read as a derived figure. A `"0"` that *is* there is a real --- */
+  /* --- zero: no interest was attributed, no fee was charged.             --- */
+
+  /** Where the mark came from. `NONE` means the holding is carried at cost. */
+  priceSource: PriceSource;
+  /** Resolved price per unit, minor units of `priceCurrency`. */
+  priceMinor: string | null;
+  /**
+   * The currency the price is denominated in — the security's own trading
+   * currency, which is what the price service resolves in. Usually equal to
+   * `tradeCurrency`; it is carried separately because the two come from
+   * different places (the security master vs. the posting) and a market value
+   * is in the *price's* currency, whatever the posting said.
+   */
+  priceCurrency: string | null;
+  /** Minor-unit scale of `priceCurrency`, for rendering `marketValueTradeMinor`. */
+  priceMinorUnits: number | null;
+  /** The date the price really belongs to, which may be before the valuation date. */
+  priceAsOf: string | null;
+  /** True when `priceAsOf` is older than the date valuation was asked for. */
+  priceIsStale: boolean;
+
+  /** Quantity x price, in `priceCurrency`, minor units. */
+  marketValueTradeMinor: string | null;
+  /** The same value in the reporting currency — `null` when no rate exists. */
+  marketValueMinor: string | null;
+  /** Reporting-currency market value less cost basis. */
+  unrealizedGainMinor: string | null;
+  /** Borrowing cost attributed to this holding by dollar-days, minor units. */
+  interestCostMinor: string | null;
+  /** Fees posted against this holding, minor units. Excludes portfolio-level fees. */
+  feeCostMinor: string | null;
+  /** Return before financing and costs: gain / cost, integer basis points. */
+  grossReturnBps: number | null;
+  /** Return after attributed interest and fees. The headline figure. */
+  netReturnBps: number | null;
+
+  /** True when any figure above is missing, stale, or incomplete. */
+  valuationIsUncertain: boolean;
+  /** One human-readable reason per gap, naming what is missing and why. */
+  valuationUncertaintyReasons: string[];
 };
 
 /**
@@ -151,6 +198,45 @@ export type TaxSummary = {
   uncertaintyReasons: string[];
 };
 
+/**
+ * The portfolio's valuation, and the product's headline number.
+ *
+ * The returns are **inception-to-date on cost**, not time-weighted or annualized:
+ *
+ *   gross = (marketValue - cost) * 10000 / cost
+ *   net   = (marketValue - cost - interest - fees) * 10000 / cost
+ *
+ * `net` is the default figure to show; `gross` exists so the cost of borrowing
+ * can be seen, and must never be labelled as net. Every field is `null` when
+ * an input is missing, with the reason in `uncertaintyReasons` — a return
+ * derived from a partial portfolio would read as fact.
+ */
+export type ValuationSummary = {
+  /** Reporting-currency market value of every holding, minor units. */
+  marketValueMinor: string | null;
+  /** Pooled ACB across every holding, the denominator of both returns. */
+  costBasisMinor: string | null;
+  unrealizedGainMinor: string | null;
+  /**
+   * Investment-use interest charged over the ledger's whole span, minor units.
+   * The portfolio figure is the charge itself, not a sum of attributions, so
+   * it includes interest on holdings since sold.
+   */
+  interestCostMinor: string | null;
+  /** Every fee posted in the reporting currency, whether or not attributable. */
+  feeCostMinor: string | null;
+  /** Integer basis points, before financing and costs. */
+  grossReturnBps: number | null;
+  /** Integer basis points, after interest and fees. Defaults to this. */
+  netReturnBps: number | null;
+  /** The date prices were asked for, or `null` when none were resolved. */
+  pricedAsOf: string | null;
+  /** True when at least one holding is marked at a price older than that date. */
+  hasStalePrice: boolean;
+  isUncertain: boolean;
+  uncertaintyReasons: string[];
+};
+
 export type PortfolioSnapshot = {
   householdId?: string | undefined;
   reportingCurrency?: string | undefined;
@@ -203,6 +289,8 @@ export type PortfolioSnapshot = {
   allocationIsIncomplete: boolean;
   /** Month-end net worth, oldest first, one point per calendar month. */
   valueOverTime: ValuePoint[];
+  /** Market value, unrealized gain and returns. See `ValuationSummary`. */
+  valuation: ValuationSummary;
   openItems: OpenItem[];
   openItemCounts: OpenItemCounts;
   /** `null` when there is no posted activity to summarize. */
@@ -225,6 +313,28 @@ export function emptyBalancesByType(): Record<AccountType, BalanceRow[]> {
   };
 }
 
+/**
+ * A valuation with nothing derived.
+ *
+ * Not uncertain: there is no portfolio here whose figures could be incomplete.
+ * The `null`s say "nothing was derived", which is what an empty snapshot means.
+ */
+export function emptyValuation(): ValuationSummary {
+  return {
+    marketValueMinor: null,
+    costBasisMinor: null,
+    unrealizedGainMinor: null,
+    interestCostMinor: null,
+    feeCostMinor: null,
+    grossReturnBps: null,
+    netReturnBps: null,
+    pricedAsOf: null,
+    hasStalePrice: false,
+    isUncertain: false,
+    uncertaintyReasons: [],
+  };
+}
+
 /** A snapshot with nothing derived yet — no data, rather than fake data. */
 export function emptyPortfolioSnapshot(
   fields: Pick<PortfolioSnapshot, "householdId" | "reportingCurrency" | "message"> = {},
@@ -244,6 +354,7 @@ export function emptyPortfolioSnapshot(
     allocationBasis: "COST",
     allocationIsIncomplete: false,
     valueOverTime: [],
+    valuation: emptyValuation(),
     openItems: [],
     openItemCounts: {
       unknownCost: 0,

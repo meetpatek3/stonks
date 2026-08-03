@@ -1,6 +1,11 @@
 import {
+  QUANTITY_SCALE,
+  addCalendarDays,
   allocateExact,
+  attributeInvestmentInterest,
   isUnknownCost,
+  mulDivFloor,
+  qtyFromDecimalString,
   qtyToDecimalString,
   replay,
   sortJournals,
@@ -11,6 +16,8 @@ import {
   type Journal,
   type LedgerState,
 } from "@stonks/ledger";
+import { formatMoney } from "@/lib/format";
+import type { ResolvedPrice } from "@/lib/market/price-service";
 import {
   emptyBalancesByType,
   emptyPortfolioSnapshot,
@@ -20,6 +27,7 @@ import {
   type PortfolioSnapshot,
   type PositionRow,
   type TaxSummary,
+  type ValuationSummary,
   type ValuePoint,
 } from "@/lib/portfolio-shared";
 
@@ -69,10 +77,42 @@ export type DerivePortfolioInput = {
    * a year with no activity yet.
    */
   taxYear?: number;
+  /**
+   * Resolved market prices, one per security, as data.
+   *
+   * Price resolution is asynchronous and does I/O; this derivation is neither,
+   * and stays a pure function of its inputs so it can be exercised with
+   * in-memory journals and a hand-written price list.
+   * `lib/portfolio.ts` does the fetching. A security absent from this list is
+   * treated exactly like one the service could not price: carried at cost,
+   * with the gap stated.
+   */
+  prices?: readonly ResolvedPrice[];
 };
 
 /** Basis-point denominator: allocation shares always sum to this. */
 const TOTAL_BPS = 10_000n;
+
+/** `Quantity.scaled` is an integer at this many decimal places. */
+const QUANTITY_SCALE_FACTOR = 10n ** BigInt(QUANTITY_SCALE);
+
+/**
+ * A position before valuation: what replay alone can say about a holding.
+ *
+ * Every field of it is also a field of `PositionRow`, so the valued row is the
+ * same row with the derived figures filled in rather than a parallel shape.
+ */
+type PositionCore = Pick<
+  PositionRow,
+  | "key"
+  | "accountId"
+  | "securityId"
+  | "symbol"
+  | "quantity"
+  | "tradeCurrency"
+  | "costReportingMinor"
+  | "costIsUnknown"
+>;
 
 export function derivePortfolioSnapshot(
   input: DerivePortfolioInput,
@@ -123,10 +163,10 @@ export function derivePortfolioSnapshot(
 
   const totals = sumTotals(state, metaById, reportingCurrency);
 
-  const positions: PositionRow[] = [];
+  const core: PositionCore[] = [];
   for (const [key, position] of state.positions) {
     const costUnknown = isUnknownCost(position.costState);
-    positions.push({
+    core.push({
       key,
       accountId: position.accountId,
       securityId: position.securityId,
@@ -139,7 +179,21 @@ export function derivePortfolioSnapshot(
       costIsUnknown: costUnknown,
     });
   }
-  positions.sort((a, b) => a.key.localeCompare(b.key));
+  core.sort((a, b) => a.key.localeCompare(b.key));
+
+  const reportingMinorUnits =
+    input.reportingMinorUnits ??
+    accounts.find((meta) => meta.currency === reportingCurrency)?.minorUnits ??
+    null;
+
+  const { positions, valuation } = deriveValuation({
+    core,
+    prices: input.prices ?? [],
+    journals,
+    ledgerAccounts,
+    reportingCurrency,
+    reportingMinorUnits,
+  });
 
   const { allocation, allocationIsIncomplete, zeroCost } =
     deriveAllocation(positions);
@@ -159,10 +213,7 @@ export function derivePortfolioSnapshot(
     balances,
     balancesByType,
     positions,
-    reportingMinorUnits:
-      input.reportingMinorUnits ??
-      accounts.find((meta) => meta.currency === reportingCurrency)?.minorUnits ??
-      null,
+    reportingMinorUnits,
     netWorthMinor: totals.netWorth.toString(),
     totalInvestedMinor: totals.invested.toString(),
     totalBorrowedMinor: totals.borrowed.toString(),
@@ -176,6 +227,7 @@ export function derivePortfolioSnapshot(
       metaById,
       reportingCurrency,
     ),
+    valuation,
     openItems,
     openItemCounts: {
       unknownCost: countOf("UNKNOWN_COST_BASIS"),
@@ -270,14 +322,14 @@ function sumTotals(
  * caller can raise a *traceable* open item naming the holding rather than
  * leaving the UI with only a boolean.
  */
-function deriveAllocation(positions: readonly PositionRow[]): {
+function deriveAllocation(positions: readonly PositionCore[]): {
   allocation: AllocationRow[];
   allocationIsIncomplete: boolean;
   /** Positions with a known but non-positive cost, excluded from the split. */
-  zeroCost: PositionRow[];
+  zeroCost: PositionCore[];
 } {
-  const weighted: { position: PositionRow; cost: bigint }[] = [];
-  const zeroCost: PositionRow[] = [];
+  const weighted: { position: PositionCore; cost: bigint }[] = [];
+  const zeroCost: PositionCore[] = [];
   let omitted = false;
 
   for (const position of positions) {
@@ -319,6 +371,486 @@ function deriveAllocation(positions: readonly PositionRow[]): {
   }));
 
   return { allocation, allocationIsIncomplete: omitted, zeroCost };
+}
+
+/* ------------------------------------------------------------------ */
+/* Valuation                                                           */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Market value, unrealized gain, and returns gross and net of borrowing cost.
+ *
+ * **The formulas.** Both returns are inception-to-date on the holding's own
+ * pooled cost — not time-weighted, not annualized, and not a period return
+ * (this ledger has one price per security, for one date, so a period return
+ * has no earlier mark to measure against):
+ *
+ *     unrealizedGain = marketValue - cost
+ *     grossReturnBps = unrealizedGain                        * 10000 / cost
+ *     netReturnBps   = (unrealizedGain - interest - fees)    * 10000 / cost
+ *
+ * Gross is before financing and costs; net is after the interest attributed to
+ * the holding by dollar-days and the fees posted against it. `netReturnBps` is
+ * computed from the raw numerator rather than by adjusting `grossReturnBps`,
+ * so the two do not compound a rounding step.
+ *
+ * **The uncertainty rule.** Anything not derivable is `null` with a reason,
+ * never `0`. No price, no FX rate for the price's currency, an unknown cost
+ * basis, a zero cost basis, or an interest charge that cannot be attributed
+ * each null out exactly the figures that depend on them and leave the rest
+ * standing — an unknowable financing cost removes the net return but not the
+ * gross one.
+ *
+ * A **stale** price is the one input that does not null anything out. It is a
+ * real price for a real date, just not for today's, so the figures are derived
+ * and `priceAsOf` / `priceIsStale` travel with every one of them.
+ */
+function deriveValuation(args: {
+  core: readonly PositionCore[];
+  prices: readonly ResolvedPrice[];
+  journals: readonly Journal[];
+  ledgerAccounts: ReadonlyMap<string, Account>;
+  reportingCurrency: string;
+  reportingMinorUnits: number | null;
+}): { positions: PositionRow[]; valuation: ValuationSummary } {
+  const { core, prices, journals, ledgerAccounts } = args;
+  const { reportingCurrency, reportingMinorUnits } = args;
+
+  const priceBySecurity = new Map(prices.map((price) => [price.securityId, price]));
+  const heldKeys = new Set(core.map((position) => position.key));
+  const interest = attributeInterest(journals, ledgerAccounts, reportingCurrency, heldKeys);
+  const fees = sumFees(journals, reportingCurrency);
+  const describe = (minor: bigint) =>
+    describeMoney(minor, reportingCurrency, reportingMinorUnits);
+
+  const positions: PositionRow[] = [];
+  /** Reasons that also make a *portfolio* figure incomplete. */
+  const sharedReasons: string[] = [];
+
+  for (const position of core) {
+    const local: string[] = [];
+    const shared: string[] = [];
+    const resolved = priceBySecurity.get(position.securityId);
+    const mark = usableMark(resolved);
+
+    if (mark === undefined) {
+      shared.push(
+        isNegativePrice(resolved)
+          ? `The recorded price for ${position.symbol} is negative, so it is not a ` +
+              `usable mark and the holding is carried at cost.`
+          : `No price is available for ${position.symbol}, so it is carried at cost ` +
+              `and no return on it can be stated.`,
+      );
+    } else if (mark.stale) {
+      shared.push(
+        `${position.symbol} is marked at its ${mark.asOf} price, not at a price ` +
+          `for ${mark.requestedAsOf}; every figure derived from it is as of that ` +
+          `earlier date.`,
+      );
+    }
+
+    const marketValueTrade =
+      mark === undefined
+        ? null
+        : mulDivFloor(
+            qtyFromDecimalString(position.quantity).scaled,
+            mark.priceMinor,
+            QUANTITY_SCALE_FACTOR,
+          );
+
+    // `replay` converts no FX and neither does this: with the price in another
+    // currency and no rate, the reporting-currency value is unknown, not
+    // approximate. Today the only rate this read model has is the identity
+    // one, so conversion happens exactly when the currencies already agree.
+    let marketValue: bigint | null = null;
+    if (marketValueTrade !== null && mark !== undefined) {
+      if (mark.currency === reportingCurrency) {
+        marketValue = marketValueTrade;
+      } else {
+        shared.push(
+          `${position.symbol} is priced in ${mark.currency} and no rate is ` +
+            `available to state that in ${reportingCurrency}, so its market value ` +
+            `and return are excluded.`,
+        );
+      }
+    }
+
+    const cost =
+      position.costReportingMinor === null ? null : BigInt(position.costReportingMinor);
+
+    if (cost === null) {
+      shared.push(
+        `No cost basis is recorded for ${position.symbol}, so its gain and return ` +
+          `cannot be derived from its market value.`,
+      );
+    } else if (cost <= 0n && marketValue !== null) {
+      // A gift or zero-basis spinoff: the gain is real, the return is not a
+      // number. Local only — the portfolio has other holdings to divide by.
+      local.push(
+        `${position.symbol} has a recorded cost of zero, so it has no basis to ` +
+          `state a return on even though its gain is known.`,
+      );
+    }
+
+    const gain = marketValue !== null && cost !== null ? marketValue - cost : null;
+    const interestCost = interest.byKey === null ? null : (interest.byKey.get(position.key) ?? 0n);
+    const feeCost = fees.byKey === null ? null : (fees.byKey.get(position.key) ?? 0n);
+
+    if (interest.byKey === null) shared.push(...interest.blockingReasons);
+    if (fees.byKey === null) shared.push(...fees.blockingReasons);
+
+    if (fees.byKey !== null && fees.unattributedMinor > 0n) {
+      local.push(
+        `Fees of ${describe(fees.unattributedMinor)} name no holding, so they are ` +
+          `excluded from this holding's net return and counted only across the ` +
+          `portfolio.`,
+      );
+    }
+
+    const netNumerator =
+      gain !== null && interestCost !== null && feeCost !== null
+        ? gain - interestCost - feeCost
+        : null;
+
+    const reasons = [...shared, ...local];
+    sharedReasons.push(...shared);
+
+    positions.push({
+      ...position,
+      priceSource: mark?.source ?? "NONE",
+      priceMinor: mark?.priceMinor.toString() ?? null,
+      priceCurrency: mark?.currency ?? null,
+      priceMinorUnits: mark?.minorUnits ?? null,
+      priceAsOf: mark?.asOf ?? null,
+      priceIsStale: mark?.stale ?? false,
+      marketValueTradeMinor: marketValueTrade?.toString() ?? null,
+      marketValueMinor: marketValue?.toString() ?? null,
+      unrealizedGainMinor: gain?.toString() ?? null,
+      interestCostMinor: interestCost?.toString() ?? null,
+      feeCostMinor: feeCost?.toString() ?? null,
+      grossReturnBps: gain === null || cost === null ? null : returnBps(gain, cost),
+      netReturnBps:
+        netNumerator === null || cost === null ? null : returnBps(netNumerator, cost),
+      valuationIsUncertain: reasons.length > 0,
+      valuationUncertaintyReasons: reasons,
+    });
+  }
+
+  return {
+    positions,
+    valuation: summarizeValuation({
+      positions,
+      sharedReasons,
+      interest,
+      fees,
+      pricedAsOf: prices[0]?.requestedAsOf ?? null,
+    }),
+  };
+}
+
+/**
+ * The portfolio's own figures.
+ *
+ * A total is stated only when every holding contributes to it: a market value
+ * that quietly omitted an unpriced holding would understate the portfolio, and
+ * a return computed over part of it would read as a return over all of it.
+ * Interest and fees are the *charges themselves*, not sums of attributions, so
+ * the headline is net of every cost even where the per-holding split is not
+ * derivable.
+ */
+function summarizeValuation(args: {
+  positions: readonly PositionRow[];
+  sharedReasons: readonly string[];
+  interest: InterestAttribution;
+  fees: FeeAttribution;
+  pricedAsOf: string | null;
+}): ValuationSummary {
+  const { positions, sharedReasons, interest, fees, pricedAsOf } = args;
+
+  const reasons = [...new Set(sharedReasons)];
+
+  let marketValue: bigint | null = 0n;
+  let cost: bigint | null = 0n;
+  for (const position of positions) {
+    if (position.marketValueMinor === null) marketValue = null;
+    else if (marketValue !== null) marketValue += BigInt(position.marketValueMinor);
+
+    if (position.costReportingMinor === null) cost = null;
+    else if (cost !== null) cost += BigInt(position.costReportingMinor);
+  }
+
+  if (positions.length === 0) {
+    reasons.push(
+      "There are no holdings, so there is no cost basis to state a return on.",
+    );
+  }
+
+  if (interest.strandedMinor > 0n) {
+    reasons.push(
+      `Some interest is attributed to a holding no longer held. The portfolio ` +
+        `figure includes it; the per-holding figures do not.`,
+    );
+  }
+
+  const gain = marketValue !== null && cost !== null ? marketValue - cost : null;
+  const netNumerator =
+    gain !== null && interest.totalMinor !== null && fees.totalMinor !== null
+      ? gain - interest.totalMinor - fees.totalMinor
+      : null;
+
+  const hasStalePrice = positions.some((position) => position.priceIsStale);
+
+  return {
+    marketValueMinor: marketValue?.toString() ?? null,
+    costBasisMinor: cost?.toString() ?? null,
+    unrealizedGainMinor: gain?.toString() ?? null,
+    interestCostMinor: interest.totalMinor?.toString() ?? null,
+    feeCostMinor: fees.totalMinor?.toString() ?? null,
+    grossReturnBps: gain === null || cost === null ? null : returnBps(gain, cost),
+    netReturnBps:
+      netNumerator === null || cost === null ? null : returnBps(netNumerator, cost),
+    pricedAsOf,
+    hasStalePrice,
+    isUncertain: reasons.length > 0 || hasStalePrice,
+    uncertaintyReasons: reasons,
+  };
+}
+
+/** A resolved price narrowed to one that can actually serve as a mark. */
+type UsableMark = Omit<ResolvedPrice, "priceMinor"> & { priceMinor: bigint };
+
+/**
+ * The mark a holding can be valued at, or `undefined` when there is none.
+ *
+ * `NONE` means the service found no price at all. A negative price cannot
+ * arise legitimately, and accepting one would turn a bad row into a negative
+ * market value that reads as derived — so it is refused here, where the
+ * refusal can be stated, rather than propagated. Narrowing in one place is
+ * also what lets every figure downstream be computed without a non-null
+ * assertion on `priceMinor`.
+ */
+function usableMark(price: ResolvedPrice | undefined): UsableMark | undefined {
+  if (price === undefined || price.source === "NONE") return undefined;
+  if (price.priceMinor === null || price.priceMinor < 0n) return undefined;
+  return { ...price, priceMinor: price.priceMinor };
+}
+
+/** Distinguishes "no price" from "a price that cannot be used", for the reason text. */
+function isNegativePrice(price: ResolvedPrice | undefined): boolean {
+  return price?.priceMinor != null && price.priceMinor < 0n;
+}
+
+/**
+ * A return in integer basis points, or `null` when there is no denominator to
+ * divide by.
+ *
+ * Basis points are a ratio, not money, and are bounded by the portfolio's own
+ * scale, so the `Number` conversion here is exact and is not the forbidden
+ * money→number one. `bigint` division truncates toward zero, so a gain and a
+ * loss of the same size round symmetrically rather than drifting apart.
+ */
+function returnBps(gain: bigint, cost: bigint): number | null {
+  if (cost <= 0n) return null;
+  return Number((gain * TOTAL_BPS) / cost);
+}
+
+type InterestAttribution = {
+  /** Investment interest per position key, or `null` when not derivable. */
+  byKey: Map<string, bigint> | null;
+  /** The household's whole investment-use interest charge, or `null`. */
+  totalMinor: bigint | null;
+  /** Attributed to holdings no longer held, so carried by no row. */
+  strandedMinor: bigint;
+  /** Why nothing could be attributed. Empty unless `byKey` is `null`. */
+  blockingReasons: string[];
+};
+
+/**
+ * Borrowing cost per holding, from the ledger's own dollar-days attribution.
+ *
+ * Only the INVESTMENT share of a charge is a cost of investing, and that share
+ * is knowable only from the facility-use attribution a draw carries. Interest
+ * with no such attribution is not "zero investment interest" — it is an
+ * unknown amount of it, so nothing is attributed at all and every net return
+ * goes `null` rather than being quietly understated.
+ */
+function attributeInterest(
+  journals: readonly Journal[],
+  ledgerAccounts: ReadonlyMap<string, Account>,
+  reportingCurrency: string,
+  heldKeys: ReadonlySet<string>,
+): InterestAttribution {
+  const posted = sortJournals(journals);
+  const blockingReasons: string[] = [];
+  let total = 0n;
+
+  for (const journal of posted) {
+    if (journal.type !== "INTEREST_CHARGED") continue;
+
+    if (!journal.facilityUses || journal.facilityUses.length === 0) {
+      blockingReasons.push(
+        `${journal.id}: interest was charged with no facility-use attribution, so ` +
+          `how much of it financed investing is not derivable and no return can be ` +
+          `stated net of it.`,
+      );
+      continue;
+    }
+    for (const line of journal.facilityUses) {
+      if (line.use !== "INVESTMENT") continue;
+      if (line.amount.currency !== reportingCurrency) {
+        blockingReasons.push(
+          `${journal.id}: interest is in ${line.amount.currency} and no rate is ` +
+            `available to state it in ${reportingCurrency}, so it cannot be counted ` +
+            `as a cost.`,
+        );
+        continue;
+      }
+      total += line.amount.minor;
+    }
+  }
+
+  if (blockingReasons.length > 0) {
+    return { byKey: null, totalMinor: null, strandedMinor: 0n, blockingReasons };
+  }
+
+  const first = posted[0];
+  const last = posted[posted.length - 1];
+  if (total === 0n || !first || !last) {
+    // No investment interest is a fact, not a gap: every holding's borrowing
+    // cost really is zero.
+    return { byKey: new Map(), totalMinor: 0n, strandedMinor: 0n, blockingReasons };
+  }
+
+  const { allocations, unallocatedMinor } = attributeInvestmentInterest({
+    journals: posted,
+    accounts: ledgerAccounts,
+    // Inclusive of the last day of activity: the attribution's period is
+    // half-open, so the end is the day after it.
+    periodStart: first.tradeDate,
+    periodEnd: addCalendarDays(last.tradeDate, 1),
+    investmentInterestMinor: total,
+  });
+
+  const byKey = new Map<string, bigint>();
+  let stranded = unallocatedMinor;
+  for (const allocation of allocations) {
+    const key = `${allocation.accountId}:${allocation.securityId}`;
+    if (heldKeys.has(key)) byKey.set(key, allocation.interestMinor);
+    else stranded += allocation.interestMinor;
+  }
+
+  return { byKey, totalMinor: total, strandedMinor: stranded, blockingReasons };
+}
+
+type FeeAttribution = {
+  /** Fees per position key, or `null` when a fee is not derivable at all. */
+  byKey: Map<string, bigint> | null;
+  /** Every fee the household paid in the reporting currency, or `null`. */
+  totalMinor: bigint | null;
+  /** The share of `totalMinor` that names no holding. */
+  unattributedMinor: bigint;
+  blockingReasons: string[];
+};
+
+/**
+ * Fees, and the share of them that belongs to a named holding.
+ *
+ * A fee is what left a household account, so it is read off the non-EXTERNAL
+ * legs (the EXTERNAL leg is the party charging it). A leg that names a
+ * security belongs to that holding; an account-level fee belongs to no
+ * holding, and is counted across the portfolio rather than spread over
+ * holdings by a rule the ledger never stated.
+ */
+function sumFees(
+  journals: readonly Journal[],
+  reportingCurrency: string,
+): FeeAttribution {
+  const byKey = new Map<string, bigint>();
+  const blockingReasons: string[] = [];
+  let total = 0n;
+  let attributed = 0n;
+
+  for (const journal of sortJournals(journals)) {
+    if (journal.type !== "FEE") continue;
+
+    for (const posting of journal.postings) {
+      // A fee reduces a household account, so its cost is the negated outflow;
+      // the positive leg is the counterparty receiving it, and is not a second
+      // fee. Tested for first so a foreign-currency charge raises one reason
+      // rather than one per leg of the same journal.
+      if (posting.amount.minor >= 0n) continue;
+      if (posting.amount.currency !== reportingCurrency) {
+        blockingReasons.push(
+          `${journal.id}: the fee is in ${posting.amount.currency} and no rate is ` +
+            `available to state it in ${reportingCurrency}, so it cannot be counted ` +
+            `as a cost.`,
+        );
+        continue;
+      }
+      const cost = -posting.amount.minor;
+      total += cost;
+      if (posting.securityId !== undefined) {
+        const key = `${posting.accountId}:${posting.securityId}`;
+        byKey.set(key, (byKey.get(key) ?? 0n) + cost);
+        attributed += cost;
+      }
+    }
+  }
+
+  if (blockingReasons.length > 0) {
+    return { byKey: null, totalMinor: null, unattributedMinor: 0n, blockingReasons };
+  }
+
+  return {
+    byKey,
+    totalMinor: total,
+    unattributedMinor: total - attributed,
+    blockingReasons,
+  };
+}
+
+/**
+ * An amount inside a sentence.
+ *
+ * A reason has to name the money it is about, and the reporting currency's
+ * scale can be unknown — in which case the amount is stated in minor units
+ * rather than at a guessed decimal point, which would state a different number.
+ */
+function describeMoney(
+  minor: bigint,
+  currency: string,
+  minorUnits: number | null,
+): string {
+  return minorUnits === null
+    ? `${minor.toString()} minor units of ${currency}`
+    : formatMoney(minor.toString(), currency, minorUnits);
+}
+
+/**
+ * The securities the household still holds, so a price is never fetched for a
+ * holding it has sold out of.
+ *
+ * Quantities net to zero exactly when a position is closed (`replay` rejects a
+ * negative quantity outright, so a holding cannot go short and net back to
+ * zero while still existing). This is a cheap scan rather than a second
+ * replay, because its caller needs the list *before* it can resolve the prices
+ * that the replayed snapshot then consumes.
+ */
+export function heldSecurityIds(journals: readonly Journal[]): string[] {
+  const scaledBySecurity = new Map<string, bigint>();
+
+  for (const journal of sortJournals(journals)) {
+    for (const posting of journal.postings) {
+      if (posting.securityId === undefined || posting.quantity === undefined) continue;
+      const current = scaledBySecurity.get(posting.securityId) ?? 0n;
+      scaledBySecurity.set(posting.securityId, current + posting.quantity.scaled);
+    }
+  }
+
+  return [...scaledBySecurity.entries()]
+    .filter(([, scaled]) => scaled !== 0n)
+    .map(([securityId]) => securityId)
+    .sort();
 }
 
 /**
@@ -388,8 +920,8 @@ function nextMonth(month: string): string {
  * this function, so neither is guessed at.
  */
 function deriveOpenItems(
-  positions: readonly PositionRow[],
-  zeroCostPositions: readonly PositionRow[],
+  positions: readonly PositionCore[],
+  zeroCostPositions: readonly PositionCore[],
   unconvertibleAccountIds: readonly string[],
   metaById: ReadonlyMap<string, AccountMeta>,
 ): OpenItem[] {
