@@ -582,10 +582,13 @@ describe("supersede_journal", () => {
 });
 
 describe("scope and annotations", () => {
+  // Object rows so vitest prints only the named fields in the test title —
+  // printf-formatted tuples would stringify the entire tool definition
+  // (zod schemas and all) into the suite output.
   it.each([
-    ["record_journal", recordJournalTool, false],
-    ["supersede_journal", supersedeJournalTool, true],
-  ] as const)("%s requires read_write scope with destructiveHint=%s", (name, tool, destructive) => {
+    { name: "record_journal", tool: recordJournalTool, destructive: false },
+    { name: "supersede_journal", tool: supersedeJournalTool, destructive: true },
+  ])("$name requires read_write scope with destructiveHint=$destructive", ({ name, tool, destructive }) => {
     expect(tool.name).toBe(name);
     expect(tool.scope).toBe("read_write");
     expect(tool.annotations.readOnlyHint).toBe(false);

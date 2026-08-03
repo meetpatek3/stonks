@@ -233,15 +233,23 @@ describe("tool registrar", () => {
   });
 
   it("hides unexpected errors behind a generic message with no stack text", async () => {
-    const handler = vi.fn(async () => {
-      throw new Error("pg connection failed at secret.internal:5432");
-    });
-    const result = await invokeTool(writeTool(handler), ctx("read_write"), {});
-    expect(result.isError).toBe(true);
-    const payload = JSON.stringify(result);
-    expect(payload).not.toContain("secret.internal");
-    expect(payload).not.toContain("pg connection failed");
-    expect(result.structuredContent).toMatchObject({ code: "INTERNAL" });
+    // The mapping deliberately logs a correlation id server-side; keep that
+    // log out of the suite output without touching the assertion.
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const handler = vi.fn(async () => {
+        throw new Error("pg connection failed at secret.internal:5432");
+      });
+      const result = await invokeTool(writeTool(handler), ctx("read_write"), {});
+      expect(result.isError).toBe(true);
+      const payload = JSON.stringify(result);
+      expect(payload).not.toContain("secret.internal");
+      expect(payload).not.toContain("pg connection failed");
+      expect(result.structuredContent).toMatchObject({ code: "INTERNAL" });
+      expect(consoleSpy).toHaveBeenCalledOnce();
+    } finally {
+      consoleSpy.mockRestore();
+    }
   });
 
   it("rejects a JSON-number amountMinor at the schema boundary, naming the field and format", async () => {
@@ -277,9 +285,16 @@ describe("toToolError", () => {
   });
 
   it("never leaks internals for unexpected errors", () => {
-    const result = toToolError(new Error("select * from api_token where hash = 'abc'"));
-    expect(JSON.stringify(result)).not.toContain("api_token");
-    expect(result.structuredContent).toMatchObject({ code: "INTERNAL" });
+    // Same deliberate correlation-id log; suppressed here, still asserted.
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const result = toToolError(new Error("select * from api_token where hash = 'abc'"));
+      expect(JSON.stringify(result)).not.toContain("api_token");
+      expect(result.structuredContent).toMatchObject({ code: "INTERNAL" });
+      expect(consoleSpy).toHaveBeenCalledOnce();
+    } finally {
+      consoleSpy.mockRestore();
+    }
   });
 });
 
