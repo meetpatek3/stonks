@@ -411,6 +411,111 @@ no other file needs `Number(...)` on money.
 
 ---
 
+## Task 12: Price and security schema
+
+**Added 2026-08-03.** Owner decision: the app cannot answer its central question — what did an
+investment earn after all costs — because no price source exists, so positions are carried at
+cost and unrealized gain is unknowable. Tasks 12-14 fix that. **Execute 12 → 13 → 14 before
+Task 7**, which depends on them.
+
+`packages/ledger/src/market/types.ts` already defines `PriceQuote`, `PriceOverride`,
+`MarketDataProvider`, and `resolvePrice` (which never invents a price). The domain layer is
+done; the persistence and wiring are missing.
+
+**Files:** `packages/db/src/schema/security.ts` (new),
+`packages/db/src/schema/price.ts` (new), `packages/db/src/schema/index.ts`,
+`packages/db/drizzle/` (new migration), `packages/db/src/repos/price-repo.ts` (new),
+`packages/db/tests/price-repo.integration.test.ts` (new)
+
+**Steps**
+
+1. Read `packages/db/src/schema/account.ts` and `packages/db/src/repos/journal-repo.ts` first —
+   match their conventions exactly (household scoping, money columns, id style).
+2. Write the failing repo test first, following `packages/db/tests/journal-repo.integration.test.ts`.
+3. Schema. Securities are identified **independently of ticker symbols** so a symbol change,
+   exchange change, or cross-listing cannot create a duplicate position or a phantom gain — this
+   is a stated product requirement, not an optimisation:
+   - `security`: stable id, name, security type, and the currency it trades in.
+   - `security_symbol`: symbol + exchange + effective date range, many-to-one onto `security`.
+   - `price_quote`: security, currency, `as_of` date, `price_minor` (money column — follow the
+     existing money column convention, never a float), `source`, `fetched_at`.
+   - `price_override`: security, `as_of`, `price_minor`, `note`, plus who/when. Append-only —
+     an override is never updated in place, so the history of manual prices stays auditable.
+   All tables are household-scoped where the data is household-specific. Quotes are shared
+   reference data; overrides are household-specific. State which you chose and why.
+4. `price-repo.ts`: fetch overrides for a household, upsert quotes, and read the most recent
+   quote at or before a date. Money in and out as `bigint`; never `number`.
+5. Generate the drizzle migration. Do not hand-edit generated SQL beyond what drizzle emits.
+6. Verify: repo tests pass, `pnpm -r typecheck` passes, migration applies cleanly.
+
+**Out of scope:** the provider (Task 13) and any UI.
+
+---
+
+## Task 13: Market data provider
+
+**Goal:** real quotes behind the existing `MarketDataProvider` interface, plus manual overrides.
+
+**Files:** `apps/web/lib/market/provider.ts` (new),
+`apps/web/lib/market/<chosen-provider>.ts` (new), `apps/web/lib/market/price-service.ts` (new),
+`apps/web/tests/price-service.test.ts` (new), `.env.example`
+
+**Steps**
+
+1. Write the failing tests first, against a **fake** provider — no network calls in tests, ever.
+2. Implement one concrete `MarketDataProvider` against the external service named in the
+   dispatch. It must:
+   - be selected by environment variable, with the fixture provider as the default when no API
+     key is configured, so the app still runs self-hosted with no external dependency;
+   - never throw into a render path — a provider failure resolves to "no quote", which
+     `resolvePrice` already handles by returning `null`;
+   - convert the provider's decimal price string to `bigint` minor units **without** going
+     through `Number`. A float parse here silently corrupts every valuation downstream.
+3. `price-service.ts`: given securities and a date, resolve each price via `resolvePrice`
+   (overrides win over quotes), persist fetched quotes through the price repo, and return each
+   result tagged with `source` (`OVERRIDE` | `QUOTE` | `NONE`), `asOf`, and a `stale` flag when
+   `asOf` is older than the requested date. Never substitute a nearby price silently — when the
+   only available quote is older, return it **with** its real `asOf` and `stale: true`, per the
+   product rule that the most recent available price is shown with its timestamp.
+4. Document the required environment variables in `.env.example` and `AGENTS.md`.
+5. Verify: tests pass (no network), `build` and `typecheck` pass.
+
+---
+
+## Task 14: Valuation in the read model
+
+**Goal:** market value, unrealized gain, and returns — gross and net of borrowing cost.
+
+**Files:** `apps/web/lib/portfolio-derive.ts`, `apps/web/lib/portfolio-shared.ts`,
+`apps/web/tests/portfolio-valuation.test.ts` (new)
+
+**Steps**
+
+1. Write the failing test first, in the established style: in-memory journals and accounts, an
+   injected fake price source, hand-calculated expectations. No database, no network.
+2. Add to the read model, per position and in aggregate:
+   - `marketValueMinor` — quantity × resolved price, in the position's trade currency and
+     converted to reporting currency where a rate exists.
+   - `unrealizedGainMinor` — market value less cost basis.
+   - `grossReturnBps` — return before financing and costs.
+   - `interestCostMinor` — attributed borrowing cost via `attributeInvestmentInterest`.
+   - `netReturnBps` — return **after** attributed interest and fees. This is the product's
+     headline number and defaults to net; gross stays available and separately labelled.
+   - `priceSource`, `priceAsOf`, `priceIsStale` on every valued position.
+3. **Uncertainty is mandatory and is the hard part.** A position with no price, a stale price,
+   an unknown cost basis, or a missing FX rate must not produce a confident return. Each derived
+   field is `null` with a stated reason rather than `0`, following the `costIsUnknown` and
+   `totalsAreUncertain` patterns already in this module. A test must cover: no price available,
+   stale price, unknown cost basis, and a position whose trade currency differs from the
+   reporting currency with no rate.
+4. Replace the overview's "Not derivable" return KPI (Task 6 chose that deliberately, correctly,
+   because no price source existed) with the real net return — still labelled net-of-all-costs,
+   still showing gross separately, and still degrading to the uncertainty marker when inputs are
+   missing.
+5. Verify: tests pass, `build` and `typecheck` pass.
+
+---
+
 ## Done when
 
 - No file in `apps/web` references `demo-portfolio` or an undefined CSS variable.
