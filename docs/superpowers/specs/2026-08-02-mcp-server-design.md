@@ -282,7 +282,29 @@ Prompts:
   document it). Bearer tokens never in URLs.
 - **Rate limiting**: out of scope for v1 (single household, personal agents); note for later.
 
-## 12. Open questions for the owner
+## 12. Owner decisions (RESOLVED 2026-08-02 — binding)
+
+All questions below were put to the product owner and answered. These are decisions, not
+options. Implementers follow them; reviewers enforce them.
+
+1. **Auth: personal access tokens. No OAuth layer in v1.** Build the PAT model exactly as
+   specified in §3. Keep token verification isolated behind a single module so an OAuth
+   layer could be added later without touching any of the 23 tool implementations — but do
+   not build OAuth scaffolding now, and do not add discovery endpoints "just in case".
+2. **Confirmation gates stay.** `supersede_journal`, `commit_import_batch`, and
+   `close_account` require `confirm: true` and return a no-op preview without it, exactly as
+   §6 specifies. This is the human-in-the-loop checkpoint that bounds prompt-injection blast
+   radius; it is not negotiable at implementation time.
+3. **Prices: manual overrides only.** `set_price_override` is in. **`record_price_quote` is
+   NOT to be built** — no agent-fed quote channel. Agent-supplied prices must remain visibly
+   distinct from provider quotes, and `resolvePrice`'s `source` must always tell them apart.
+4. **The missing schema is in scope.** Create the `price_quote` / `price_override` and
+   `security` / `security_symbol` tables and migrations as prerequisite tasks, so the full
+   tool catalogue works rather than shipping visibly broken capabilities.
+5. **Journal reorder (`sort_key` rewrite) stays excluded**, as originally designed. It is
+   easy to misuse, rarely needed, and remains a web-UI admin operation. Do not expose it.
+
+## 13. Original open questions (superseded by §12)
 
 1. **OAuth vs PAT.** The MCP spec's authorization framework is OAuth 2.1; some hosted MCP
    clients (e.g. claude.ai remote connectors) prefer or require OAuth discovery. PATs are
