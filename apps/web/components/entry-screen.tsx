@@ -42,22 +42,36 @@ const FACILITY_USES: FacilityUse[] = [
 
 export type EntryScreenProps = {
   accounts: AccountRef[];
+  householdAccounts: AccountRef[];
+  externalAccountId: string | null;
   reportingCurrency: string;
   minorUnits: number;
   mruAccountId: string | null;
   defaultTradeDate: string;
+  cashByAccountId: Record<string, string>;
+  positions: Array<{
+    accountId: string;
+    securityId: string;
+    quantity: string;
+  }>;
+  securityIds: string[];
   message?: string | undefined;
 };
 
 export function EntryScreen({
   accounts,
+  householdAccounts,
+  externalAccountId,
   reportingCurrency,
   minorUnits,
   mruAccountId,
   defaultTradeDate,
+  cashByAccountId,
+  positions,
+  securityIds,
   message,
 }: EntryScreenProps) {
-  if (accounts.length < 2) {
+  if (!externalAccountId || householdAccounts.length === 0) {
     return (
       <Screen>
         <EmptyState>

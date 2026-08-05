@@ -389,20 +389,38 @@ export async function loadSessionJournalRows(): Promise<{
  */
 export async function loadEntryFormData(): Promise<{
   accounts: AccountRef[];
+  /** Open non-EXTERNAL accounts only — for pickers that hide EXTERNAL. */
+  householdAccounts: AccountRef[];
+  externalAccountId: string | null;
   reportingCurrency: string;
   minorUnits: number;
   mruAccountId: string | null;
   defaultTradeDate: string;
+  /** accountId → balance minor string (reporting currency cash on account). */
+  cashByAccountId: Record<string, string>;
+  /** Open positions for the household (qty strings). */
+  positions: Array<{
+    accountId: string;
+    securityId: string;
+    quantity: string;
+  }>;
+  /** Distinct security ids seen on household postings, sorted. */
+  securityIds: string[];
   message?: string;
 }> {
   const db = getDb();
   if (!db) {
     return {
       accounts: [],
+      householdAccounts: [],
+      externalAccountId: null,
       reportingCurrency: "CAD",
       minorUnits: 2,
       mruAccountId: null,
       defaultTradeDate: todayIsoDate(),
+      cashByAccountId: {},
+      positions: [],
+      securityIds: [],
       message: "DATABASE_URL not configured",
     };
   }
@@ -411,10 +429,15 @@ export async function loadEntryFormData(): Promise<{
   if (!session) {
     return {
       accounts: [],
+      householdAccounts: [],
+      externalAccountId: null,
       reportingCurrency: "CAD",
       minorUnits: 2,
       mruAccountId: null,
       defaultTradeDate: todayIsoDate(),
+      cashByAccountId: {},
+      positions: [],
+      securityIds: [],
       message: "not authenticated",
     };
   }
@@ -431,10 +454,15 @@ export async function loadEntryFormData(): Promise<{
   if (!householdRow) {
     return {
       accounts: [],
+      householdAccounts: [],
+      externalAccountId: null,
       reportingCurrency: "CAD",
       minorUnits: 2,
       mruAccountId: null,
       defaultTradeDate: todayIsoDate(),
+      cashByAccountId: {},
+      positions: [],
+      securityIds: [],
       message: "household not found",
     };
   }
@@ -472,28 +500,54 @@ export async function loadEntryFormData(): Promise<{
       minorUnits: row.minorUnits,
     }));
 
+  const householdAccounts = accounts.filter((a) => a.type !== "EXTERNAL");
+  const externalAccountId =
+    accounts.find((a) => a.type === "EXTERNAL")?.id ?? null;
+
   if (accounts.length === 0) {
     return {
       accounts,
+      householdAccounts,
+      externalAccountId,
       reportingCurrency,
       minorUnits,
       mruAccountId: null,
       defaultTradeDate: todayIsoDate(),
+      cashByAccountId: {},
+      positions: [],
+      securityIds: [],
       message: "no accounts",
     };
   }
 
   const journals = await createJournalRepo(db).listPosted(householdId);
+  const snapshot = await getPortfolioSnapshot(db, householdId);
   const selectable = new Set(
-    accounts.filter((a) => a.type !== "EXTERNAL").map((a) => a.id),
+    householdAccounts.map((a) => a.id),
   );
   const mruAccountId = mostRecentlyUsedAccountId(journals, selectable);
+  const cashByAccountId = Object.fromEntries(
+    snapshot.balances.map((balance) => [balance.accountId, balance.minor]),
+  );
+  const positions = snapshot.positions.map((position) => ({
+    accountId: position.accountId,
+    securityId: position.securityId,
+    quantity: position.quantity,
+  }));
+  const securityIds = [
+    ...new Set(positions.map((position) => position.securityId)),
+  ].sort();
 
   return {
     accounts,
+    householdAccounts,
+    externalAccountId,
     reportingCurrency,
     minorUnits,
     mruAccountId,
     defaultTradeDate: todayIsoDate(),
+    cashByAccountId,
+    positions,
+    securityIds,
   };
 }
