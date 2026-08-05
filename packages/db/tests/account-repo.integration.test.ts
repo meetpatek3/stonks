@@ -1,14 +1,12 @@
-import { config } from "dotenv";
-import { resolve } from "node:path";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createDb } from "../src/client.js";
 import { account, currency, household } from "../src/schema/index.js";
 import { createAccountRepo } from "../src/repos/account-repo.js";
 
-config({ path: resolve(import.meta.dirname, "../../../.env") });
+import { loadTestDatabaseUrl } from "./load-test-env.js";
 
-const databaseUrl = process.env.DATABASE_URL;
+const databaseUrl = loadTestDatabaseUrl();
 
 const describeIfDb = databaseUrl ? describe : describe.skip;
 
@@ -132,7 +130,7 @@ describeIfDb("account repo (integration)", () => {
 
   it("rejects an unknown currency at create time with a CURRENCY ValidationError", async () => {
     await expect(
-      repo.create(householdA, { name: "Euro cash", type: "CASH", currency: "EUR" }),
+      repo.create(householdA, { name: "Zork cash", type: "CASH", currency: "ZZZ" }),
     ).rejects.toMatchObject({ name: "ValidationError", code: "CURRENCY" });
   });
 

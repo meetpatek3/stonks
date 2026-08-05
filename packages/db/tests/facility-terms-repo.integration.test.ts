@@ -1,5 +1,3 @@
-import { config } from "dotenv";
-import { resolve } from "node:path";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createDb } from "../src/client.js";
@@ -13,9 +11,9 @@ import {
 } from "../src/schema/index.js";
 import { createFacilityTermsRepo } from "../src/repos/facility-terms-repo.js";
 
-config({ path: resolve(import.meta.dirname, "../../../.env") });
+import { loadTestDatabaseUrl } from "./load-test-env.js";
 
-const databaseUrl = process.env.DATABASE_URL;
+const databaseUrl = loadTestDatabaseUrl();
 
 const describeIfDb = databaseUrl ? describe : describe.skip;
 

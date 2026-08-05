@@ -1,5 +1,3 @@
-import { config } from "dotenv";
-import { resolve } from "node:path";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ValidationError, money, qtyFromDecimalString } from "@stonks/ledger";
@@ -12,9 +10,9 @@ import {
   encodeJournalCursor,
 } from "../src/repos/journal-repo.js";
 
-config({ path: resolve(import.meta.dirname, "../../../.env") });
+import { loadTestDatabaseUrl } from "./load-test-env.js";
 
-const databaseUrl = process.env.DATABASE_URL;
+const databaseUrl = loadTestDatabaseUrl();
 
 const describeIfDb = databaseUrl ? describe : describe.skip;
 

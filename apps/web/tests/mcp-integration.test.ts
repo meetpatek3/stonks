@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createDb, createTokenRepo } from "@stonks/db";
 import { account, apiToken, currency, household, journal, journalFacilityUse, posting } from "@stonks/db";
-import { loadEnv } from "@/lib/env";
+import { getTestDatabaseUrl } from "@/lib/env";
 import { POST } from "@/app/api/mcp/[transport]/route";
 import { MCP_CONNECTION_PATH } from "@/lib/mcp/endpoint";
 import { MCP_TOOLS } from "@/lib/mcp/tools";
@@ -17,11 +17,11 @@ import { MCP_TOOLS } from "@/lib/mcp/tools";
  *
  * Skipped automatically when DATABASE_URL is absent, matching the
  * `describeIfDb` convention in packages/db. When it runs, it RUNS — the
- * assertions below are against the live server path.
+ * assertions below are against the live server path. Non-local hosts are
+ * refused by getTestDatabaseUrl so Neon/production cannot be polluted.
  */
 
-loadEnv();
-const databaseUrl = process.env.DATABASE_URL;
+const databaseUrl = getTestDatabaseUrl();
 const describeIfDb = databaseUrl ? describe : describe.skip;
 
 type JsonRpc = {

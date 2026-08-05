@@ -23,7 +23,7 @@ Self-hosted portfolio tracker. Double-entry ledger is source of truth; balances/
 
 - UI: HeroUI v3 (`@heroui/react`) + HeroUI Pro (`@heroui-pro/react`) on the stock HeroUI **default dark** theme — no custom CSS. `apps/web/app/globals.css` must contain only the three import statements (see the Task 1 plan's Global Constraints); do not add custom properties, `@theme` rules, or a custom font
 - Auth: simple username/password → signed cookie (`AUTH_SECRET`, `jose`). Bootstrap first household from `AUTH_USERNAME` / `AUTH_PASSWORD` when DB empty. Credentials stored on `household.auth_username` / `auth_password_hash`
-- DB: Postgres via Docker locally; **Neon** on Vercel (`DATABASE_URL`). Drizzle uses `postgres` (postgres.js) with `prepare: false` / `max: 1` on Vercel
+- DB: Postgres via Docker locally (`.env.local` `DATABASE_URL`); **Neon** on Vercel. Keep Neon in `.env.vercel` only — never as local `DATABASE_URL`. Integration tests refuse non-loopback hosts. Drizzle uses `postgres` (postgres.js) with `prepare: false` / `max: 1` on Vercel
 - Package manager: pnpm workspaces. HeroUI Pro needs `HEROUI_AUTH_TOKEN` at install (Infisical key `HEROUI_AUTH_TOKEN`)
 - Market data: optional `TWELVEDATA_API_KEY` selects the Twelve Data provider (`apps/web/lib/market/`). Unset — the default — uses the fixture provider, so self-hosting needs no market-data account; prices then read as unknown rather than being invented. Persisted `price_quote` rows are the cache; there is no separate caching layer
 
@@ -32,7 +32,7 @@ Self-hosted portfolio tracker. Double-entry ledger is source of truth; balances/
 ```bash
 docker compose up -d postgres
 pnpm install                          # needs HEROUI_AUTH_TOKEN for Pro
-pnpm migrate                          # drizzle migrations
+pnpm migrate                          # drizzle migrations against local Docker
 pnpm --filter @stonks/web dev
 pnpm test
 ```
@@ -51,5 +51,5 @@ Production: Vercel project `meetpatek/stonks`, Neon resource `stonks-db`. Login 
 ## Deploy notes
 
 - `vercel.json` build: `pnpm --filter @stonks/web build`
-- After schema changes: migrate against Neon `DATABASE_URL` (from `vercel env pull`)
+- After schema changes: migrate local with `pnpm migrate`; migrate Neon with `vercel env pull .env.vercel --environment=production` then `pnpm migrate:neon` (do not overwrite `.env.local`)
 - Protected routes via `apps/web/middleware.ts`; public: `/login`, `/api/auth/login`, `/api/health`

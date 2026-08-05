@@ -3,15 +3,14 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createDb, currency, household } from "@stonks/db";
 import { authenticate, ensureBootstrapUser } from "@/lib/auth/credentials";
 import { hashPassword } from "@/lib/auth/password";
-import { loadEnv } from "@/lib/env";
+import { getTestDatabaseUrl } from "@/lib/env";
 
 /**
  * Reproduces the production login 500: ensureBootstrapUser tried to attach
  * AUTH_USERNAME onto an unprovisioned household even though another household
  * already owned that username (unique constraint violation → every login fails).
  */
-loadEnv();
-const databaseUrl = process.env.DATABASE_URL;
+const databaseUrl = getTestDatabaseUrl();
 const describeIfDb = databaseUrl ? describe : describe.skip;
 
 describeIfDb("credentials bootstrap", () => {

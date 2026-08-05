@@ -6,6 +6,7 @@
     "dev": "pnpm --filter @stonks/web dev",
     "build": "pnpm --filter @stonks/web build",
     "migrate": "pnpm --filter @stonks/db migrate",
+    "migrate:neon": "dotenv -e .env.vercel -- pnpm migrate",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",
     "lint": "pnpm -r lint"
