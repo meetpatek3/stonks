@@ -14,11 +14,10 @@ import { Icon } from "@iconify/react";
 import { useEffect, useState } from "react";
 import type { FacilityUse, JournalType } from "@stonks/ledger";
 import type { AccountRef } from "@/lib/ledger-table";
-import {
-  balancedMovePostings,
-  decimalAmountToMinorString,
-  defaultEntryAccounts,
-} from "@/lib/journals";
+import { buildEntryPostings } from "@/lib/entry-postings";
+import { cashAvailableMinor, cashShortfallMinor } from "@/lib/entry-sufficiency";
+import { formatMoney } from "@/lib/format";
+import { decimalAmountToMinorString } from "@/lib/journals";
 
 const JOURNAL_TYPES: JournalType[] = [
   "DEPOSIT",
@@ -59,7 +58,6 @@ export type EntryScreenProps = {
 };
 
 export function EntryScreen({
-  accounts,
   householdAccounts,
   externalAccountId,
   reportingCurrency,
@@ -79,7 +77,7 @@ export function EntryScreen({
             <EmptyState.Media variant="icon">
               <Icon icon="gravity-ui:plus" width={24} />
             </EmptyState.Media>
-            <EmptyState.Title>Need two accounts to post</EmptyState.Title>
+            <EmptyState.Title>Need accounts to post</EmptyState.Title>
             <EmptyState.Description>
               {message === "DATABASE_URL not configured"
                 ? "Database is not configured."
@@ -87,7 +85,9 @@ export function EntryScreen({
                   ? "Sign in to record a journal."
                   : message === "household not found"
                     ? "Household was not found."
-                    : "Create at least two accounts (for example Cash and External) before recording a journal."}
+                    : !externalAccountId
+                      ? "Create an External account before recording a journal."
+                      : "Create at least one household account before recording a journal."}
             </EmptyState.Description>
           </EmptyState.Header>
         </EmptyState>
@@ -98,11 +98,14 @@ export function EntryScreen({
   return (
     <Screen>
       <EntryForm
-        accounts={accounts}
+        householdAccounts={householdAccounts}
+        externalAccountId={externalAccountId}
         reportingCurrency={reportingCurrency}
         minorUnits={minorUnits}
         mruAccountId={mruAccountId}
         defaultTradeDate={defaultTradeDate}
+        cashByAccountId={cashByAccountId}
+        securityIds={securityIds}
       />
     </Screen>
   );
@@ -126,50 +129,61 @@ function Screen({ children }: { children: React.ReactNode }) {
 }
 
 function EntryForm({
-  accounts,
+  householdAccounts,
+  externalAccountId,
   reportingCurrency,
   minorUnits,
   mruAccountId,
   defaultTradeDate,
+  cashByAccountId,
+  securityIds,
 }: {
-  accounts: AccountRef[];
+  householdAccounts: AccountRef[];
+  externalAccountId: string;
   reportingCurrency: string;
   minorUnits: number;
   mruAccountId: string | null;
   defaultTradeDate: string;
+  cashByAccountId: Record<string, string>;
+  securityIds: string[];
 }) {
-  const initial = defaultEntryAccounts({
-    type: "DEPOSIT",
-    accounts,
-    mruId: mruAccountId,
-  });
-
   const [type, setType] = useState<JournalType>("DEPOSIT");
   const [tradeDate, setTradeDate] = useState(defaultTradeDate);
   const [amount, setAmount] = useState("");
-  const [fromAccountId, setFromAccountId] = useState(initial.fromId ?? "");
-  const [toAccountId, setToAccountId] = useState(initial.toId ?? "");
+  const initialAccountId =
+    (mruAccountId &&
+      householdAccounts.some((account) => account.id === mruAccountId) &&
+      mruAccountId) ||
+    householdAccounts[0]?.id ||
+    "";
+  const [accountId, setAccountId] = useState(initialAccountId);
+  const [fromAccountId, setFromAccountId] = useState(initialAccountId);
+  const [toAccountId, setToAccountId] = useState(
+    householdAccounts.find((account) => account.id !== initialAccountId)?.id ?? "",
+  );
   const [memo, setMemo] = useState("");
-  const [quantity, setQuantity] = useState("");
   const [securityId, setSecurityId] = useState("");
   const [facilityUse, setFacilityUse] = useState<FacilityUse>("INVESTMENT");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successId, setSuccessId] = useState<string | null>(null);
 
-  const fromAccount = accounts.find((a) => a.id === fromAccountId);
+  const fromAccount = householdAccounts.find((a) => a.id === fromAccountId);
   const needsFacilityUse = fromAccount?.type === "CREDIT_FACILITY";
-  const showSecurityFields = type === "BUY" || type === "SELL";
+  const isTradeOrOpening = type === "BUY" || type === "SELL" || type === "OPENING";
+  const showSecurityField =
+    type === "DIVIDEND" || type === "FEE";
 
   useEffect(() => {
-    const next = defaultEntryAccounts({
-      type,
-      accounts,
-      mruId: mruAccountId,
-    });
-    if (next.fromId) setFromAccountId(next.fromId);
-    if (next.toId) setToAccountId(next.toId);
-  }, [type, accounts, mruAccountId]);
+    if (type === "TRANSFER") {
+      setFromAccountId(initialAccountId);
+      setToAccountId(
+        householdAccounts.find((account) => account.id !== initialAccountId)?.id ?? "",
+      );
+    } else {
+      setAccountId(initialAccountId);
+    }
+  }, [type, householdAccounts, initialAccountId]);
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -178,12 +192,12 @@ function EntryForm({
     setSuccessId(null);
 
     try {
-      if (!fromAccountId || !toAccountId) {
-        setError("Choose both From and To accounts");
+      if (isTradeOrOpening) {
+        setError("BUY, SELL, and OPENING flows are coming in the next task.");
         return;
       }
-      if (fromAccountId === toAccountId) {
-        setError("From and To must be different accounts");
+      if (type === "CORPORATE_ACTION") {
+        setError("This journal type is not available in fast entry.");
         return;
       }
 
@@ -198,22 +212,70 @@ function EntryForm({
         return;
       }
 
-      const quantityOn =
-        type === "SELL" ? ("from" as const) : ("to" as const);
-      const postings = balancedMovePostings({
-        amountMinor,
-        fromAccountId,
-        toAccountId,
-        ...(showSecurityFields && quantity
-          ? {
-              quantityOn,
-              quantity,
-              ...(securityId ? { securityId } : {}),
-            }
-          : showSecurityFields && securityId
-            ? { quantityOn, securityId }
-            : {}),
-      });
+      let postings;
+      let payingAccountId: string | null = null;
+      if (type === "TRANSFER") {
+        if (householdAccounts.length < 2) {
+          setError("Create at least two household accounts before transferring.");
+          return;
+        }
+        if (!fromAccountId || !toAccountId) {
+          setError("Choose both From and To accounts");
+          return;
+        }
+        if (fromAccountId === toAccountId) {
+          setError("From and To must be different accounts");
+          return;
+        }
+        postings = buildEntryPostings({
+          type,
+          fromAccountId,
+          toAccountId,
+          amountMinor,
+        });
+        payingAccountId = fromAccountId;
+      } else {
+        if (!accountId) {
+          setError("Choose an account");
+          return;
+        }
+        if (
+          type === "DEPOSIT" ||
+          type === "DIVIDEND" ||
+          type === "INTEREST_EARNED"
+        ) {
+          postings = buildEntryPostings({
+            type,
+            accountId,
+            externalAccountId,
+            amountMinor,
+            ...(securityId ? { securityId } : {}),
+          });
+        } else {
+          postings = buildEntryPostings({
+            type,
+            accountId,
+            externalAccountId,
+            amountMinor,
+            ...(securityId ? { securityId } : {}),
+          });
+          payingAccountId = accountId;
+        }
+      }
+
+      if (
+        payingAccountId &&
+        cashShortfallMinor(
+          cashAvailableMinor(cashByAccountId[payingAccountId]),
+          amountMinor,
+        ) > 0n
+      ) {
+        const payingAccount = householdAccounts.find(
+          (account) => account.id === payingAccountId,
+        );
+        setError(`Not enough cash in ${payingAccount?.name ?? "selected account"}`);
+        return;
+      }
 
       const body: Record<string, unknown> = {
         type,
@@ -222,7 +284,7 @@ function EntryForm({
       };
       if (memo.trim()) body.memo = memo.trim();
 
-      if (needsFacilityUse) {
+      if (type === "TRANSFER" && needsFacilityUse) {
         body.facilityUses = [
           { use: facilityUse, amountMinor: amountMinor.toString() },
         ];
@@ -243,7 +305,6 @@ function EntryForm({
       setSuccessId(data.id ?? "posted");
       setAmount("");
       setMemo("");
-      setQuantity("");
       setSecurityId("");
     } catch {
       setError("Unable to reach the server");
@@ -280,97 +341,131 @@ function EntryForm({
         </Select.Popover>
       </Select>
 
-      <TextField
-        name="tradeDate"
-        isRequired
-        className="w-full"
-        value={tradeDate}
-        onChange={setTradeDate}
-      >
-        <Label>Trade date</Label>
-        <Input type="date" />
-      </TextField>
-
-      <TextField
-        name="amount"
-        isRequired
-        className="w-full"
-        value={amount}
-        onChange={setAmount}
-      >
-        <Label>Amount ({reportingCurrency})</Label>
-        <Input inputMode="decimal" placeholder="1000.00" autoComplete="off" />
-      </TextField>
-
-      <AccountSelect
-        label="From"
-        accounts={accounts}
-        selectedKey={fromAccountId}
-        onSelect={setFromAccountId}
-      />
-
-      <AccountSelect
-        label="To"
-        accounts={accounts}
-        selectedKey={toAccountId}
-        onSelect={setToAccountId}
-      />
-
-      {needsFacilityUse ? (
-        <Select
-          className="w-full"
-          selectedKey={facilityUse}
-          onSelectionChange={(key) => {
-            if (key == null) return;
-            setFacilityUse(String(key) as FacilityUse);
-          }}
-          aria-label="Facility use"
-        >
-          <Label>Facility use</Label>
-          <Select.Trigger>
-            <Select.Value />
-            <Select.Indicator />
-          </Select.Trigger>
-          <Select.Popover>
-            <ListBox>
-              {FACILITY_USES.map((use) => (
-                <ListBox.Item key={use} id={use} textValue={use}>
-                  {use}
-                  <ListBox.ItemIndicator />
-                </ListBox.Item>
-              ))}
-            </ListBox>
-          </Select.Popover>
-        </Select>
-      ) : null}
-
-      {showSecurityFields ? (
+      {isTradeOrOpening ? (
+        <p className="text-sm text-muted">
+          BUY, SELL, and OPENING flows are coming in the next task.
+        </p>
+      ) : type === "TRANSFER" && householdAccounts.length < 2 ? (
+        <EmptyState>
+          <EmptyState.Header>
+            <EmptyState.Media variant="icon">
+              <Icon icon="gravity-ui:arrow-right-arrow-left" width={24} />
+            </EmptyState.Media>
+            <EmptyState.Title>Need two household accounts</EmptyState.Title>
+            <EmptyState.Description>
+              Add another household account before recording a transfer.
+            </EmptyState.Description>
+          </EmptyState.Header>
+        </EmptyState>
+      ) : (
         <>
           <TextField
-            name="quantity"
+            name="tradeDate"
+            isRequired
             className="w-full"
-            value={quantity}
-            onChange={setQuantity}
+            value={tradeDate}
+            onChange={setTradeDate}
           >
-            <Label>Quantity</Label>
-            <Input inputMode="decimal" placeholder="10" autoComplete="off" />
+            <Label>Trade date</Label>
+            <Input type="date" />
           </TextField>
+
           <TextField
-            name="securityId"
+            name="amount"
+            isRequired
             className="w-full"
-            value={securityId}
-            onChange={setSecurityId}
+            value={amount}
+            onChange={setAmount}
           >
-            <Label>Security id</Label>
-            <Input placeholder="XEQT" autoComplete="off" />
+            <Label>Amount ({reportingCurrency})</Label>
+            <Input inputMode="decimal" placeholder="1000.00" autoComplete="off" />
+          </TextField>
+
+          {type === "TRANSFER" ? (
+            <>
+              <AccountSelect
+                label="From"
+                accounts={householdAccounts}
+                selectedKey={fromAccountId}
+                onSelect={setFromAccountId}
+                balances={cashByAccountId}
+                currency={reportingCurrency}
+                minorUnits={minorUnits}
+              />
+              <AccountSelect
+                label="To"
+                accounts={householdAccounts}
+                selectedKey={toAccountId}
+                onSelect={setToAccountId}
+              />
+            </>
+          ) : (
+            <AccountSelect
+              label={
+                type === "WITHDRAWAL"
+                  ? "From"
+                  : type === "INTEREST_CHARGED" || type === "FEE"
+                    ? "Charged on"
+                    : "Into"
+              }
+              accounts={householdAccounts}
+              selectedKey={accountId}
+              onSelect={setAccountId}
+            />
+          )}
+
+          {needsFacilityUse && type === "TRANSFER" ? (
+            <Select
+              className="w-full"
+              selectedKey={facilityUse}
+              onSelectionChange={(key) => {
+                if (key == null) return;
+                setFacilityUse(String(key) as FacilityUse);
+              }}
+              aria-label="Facility use"
+            >
+              <Label>Facility use</Label>
+              <Select.Trigger>
+                <Select.Value />
+                <Select.Indicator />
+              </Select.Trigger>
+              <Select.Popover>
+                <ListBox>
+                  {FACILITY_USES.map((use) => (
+                    <ListBox.Item key={use} id={use} textValue={use}>
+                      {use}
+                      <ListBox.ItemIndicator />
+                    </ListBox.Item>
+                  ))}
+                </ListBox>
+              </Select.Popover>
+            </Select>
+          ) : null}
+
+          {showSecurityField && securityIds.length > 0 ? (
+            <SecuritySelect
+              securityIds={securityIds}
+              selectedKey={securityId}
+              onSelect={setSecurityId}
+            />
+          ) : showSecurityField ? (
+            <TextField
+              name="securityId"
+              className="w-full"
+              value={securityId}
+              onChange={setSecurityId}
+            >
+              <Label>New security id</Label>
+              <Input placeholder="XEQT" autoComplete="off" />
+            </TextField>
+          ) : null}
+
+          <TextField name="memo" className="w-full" value={memo} onChange={setMemo}>
+            <Label>Memo</Label>
+            <Input placeholder="What happened" autoComplete="off" />
           </TextField>
         </>
-      ) : null}
-
-      <TextField name="memo" className="w-full" value={memo} onChange={setMemo}>
-        <Label>Memo</Label>
-        <Input placeholder="What happened" autoComplete="off" />
-      </TextField>
+      )}
 
       {error ? (
         <FieldError className="text-danger">{error}</FieldError>
@@ -382,7 +477,13 @@ function EntryForm({
         </p>
       ) : null}
 
-      <Button type="submit" variant="primary" isPending={pending} fullWidth>
+      <Button
+        type="submit"
+        variant="primary"
+        isPending={pending}
+        isDisabled={isTradeOrOpening || (type === "TRANSFER" && householdAccounts.length < 2)}
+        fullWidth
+      >
         Post journal
       </Button>
     </form>
@@ -394,11 +495,17 @@ function AccountSelect({
   accounts,
   selectedKey,
   onSelect,
+  balances,
+  currency,
+  minorUnits,
 }: {
   label: string;
   accounts: AccountRef[];
   selectedKey: string;
   onSelect: (id: string) => void;
+  balances?: Record<string, string>;
+  currency?: string;
+  minorUnits?: number;
 }) {
   return (
     <Select
@@ -424,6 +531,48 @@ function AccountSelect({
               textValue={account.name}
             >
               {account.name}
+              {balances && currency
+                ? ` · ${formatMoney(balances[account.id] ?? "0", currency, minorUnits)}`
+                : null}
+              <ListBox.ItemIndicator />
+            </ListBox.Item>
+          ))}
+        </ListBox>
+      </Select.Popover>
+    </Select>
+  );
+}
+
+function SecuritySelect({
+  securityIds,
+  selectedKey,
+  onSelect,
+}: {
+  securityIds: string[];
+  selectedKey: string;
+  onSelect: (id: string) => void;
+}) {
+  return (
+    <Select
+      className="w-full"
+      selectedKey={selectedKey || null}
+      onSelectionChange={(key) => onSelect(key == null || String(key) === "NONE" ? "" : String(key))}
+      aria-label="Security"
+    >
+      <Label>Security (optional)</Label>
+      <Select.Trigger>
+        <Select.Value />
+        <Select.Indicator />
+      </Select.Trigger>
+      <Select.Popover>
+        <ListBox>
+          <ListBox.Item id="NONE" textValue="None">
+            None
+            <ListBox.ItemIndicator />
+          </ListBox.Item>
+          {securityIds.map((id) => (
+            <ListBox.Item key={id} id={id} textValue={id}>
+              {id}
               <ListBox.ItemIndicator />
             </ListBox.Item>
           ))}
