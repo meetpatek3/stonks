@@ -29,6 +29,7 @@ import {
   type AccountOverviewRow,
 } from "@/lib/accounts-table";
 import type { PortfolioSnapshot } from "@/lib/portfolio-shared";
+import { FacilityTermsDialog } from "@/components/facility-terms-fields";
 
 /**
  * Account overview — persisted household accounts paired with replay balances.
@@ -60,6 +61,8 @@ type AccountsScreenProps = {
   accounts: AccountRecord[];
   currencies: CurrencyRecord[];
   includeClosed: boolean;
+  /** Account ids that currently have effective facility terms. */
+  facilityTermsAccountIds?: readonly string[];
 };
 
 export function AccountsScreen({
@@ -67,7 +70,9 @@ export function AccountsScreen({
   accounts,
   currencies,
   includeClosed,
+  facilityTermsAccountIds = [],
 }: AccountsScreenProps) {
+  const termsSet = new Set(facilityTermsAccountIds);
   const rows = sortBalanceRows(
     mergeAccountsWithBalances(accounts, snapshot.balances),
   );
@@ -93,7 +98,11 @@ export function AccountsScreen({
       ) : (
         <div className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {rows.map((row) => (
-            <AccountCard key={row.accountId} row={row} />
+            <AccountCard
+              key={row.accountId}
+              row={row}
+              hasFacilityTerms={termsSet.has(row.accountId)}
+            />
           ))}
         </div>
       )}
@@ -318,11 +327,18 @@ function AddAccountDialog({ currencies }: { currencies: CurrencyRecord[] }) {
   );
 }
 
-function AccountCard({ row }: { row: AccountOverviewRow }) {
+function AccountCard({
+  row,
+  hasFacilityTerms,
+}: {
+  row: AccountOverviewRow;
+  hasFacilityTerms: boolean;
+}) {
   const liability = isLiabilityType(row.accountType);
   const tone = accountTone(row.accountType);
   const amountTone = TREND_TONE[signedTrend(row.minor)];
   const closed = row.closedAt !== null;
+  const isFacility = row.accountType === "CREDIT_FACILITY";
 
   return (
     <Card className={closed ? "min-w-0 opacity-60" : "min-w-0"}>
@@ -339,6 +355,11 @@ function AccountCard({ row }: { row: AccountOverviewRow }) {
           {closed ? (
             <Chip size="sm" variant="soft">
               Closed
+            </Chip>
+          ) : null}
+          {isFacility && !hasFacilityTerms ? (
+            <Chip size="sm" variant="soft" color="warning">
+              No terms
             </Chip>
           ) : null}
           {row.taxTreatment ? (
@@ -367,7 +388,17 @@ function AccountCard({ row }: { row: AccountOverviewRow }) {
             Replay balance — derived, never stored.
           </p>
         </div>
-        {closed ? null : <CloseAccountDialog row={row} />}
+        {closed ? null : (
+          <div className="flex flex-wrap gap-2">
+            {isFacility ? (
+              <FacilityTermsDialog
+                accountId={row.accountId}
+                accountName={row.accountName}
+              />
+            ) : null}
+            <CloseAccountDialog row={row} />
+          </div>
+        )}
       </Card.Content>
     </Card>
   );
