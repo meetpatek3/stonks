@@ -43,6 +43,13 @@
       "when": 1785768374991,
       "tag": "0005_fearless_tigra",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1785960019628,
+      "tag": "0006_seed_currencies",
+      "breakpoints": true
     }
   ]
 }

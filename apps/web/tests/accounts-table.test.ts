@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   accountTone,
   isLiabilityType,
+  mergeAccountsWithBalances,
   sortBalanceRows,
 } from "@/lib/accounts-table";
+import type { AccountRecord } from "@stonks/db";
 import type { BalanceRow } from "@/lib/portfolio-shared";
 
 describe("isLiabilityType", () => {
@@ -50,6 +52,45 @@ describe("sortBalanceRows", () => {
   });
 });
 
+describe("mergeAccountsWithBalances", () => {
+  it("renders an account with no replay row at a zero replay balance", () => {
+    const rows = mergeAccountsWithBalances(
+      [account("new", "New savings", "CASH")],
+      [],
+    );
+
+    expect(rows).toEqual([
+      {
+        accountId: "new",
+        accountName: "New savings",
+        accountType: "CASH",
+        currency: "CAD",
+        minor: "0",
+        minorUnits: 2,
+        taxTreatment: null,
+        closedAt: null,
+      },
+    ]);
+  });
+
+  it("preserves asset-first ordering after merging persisted accounts", () => {
+    const rows = mergeAccountsWithBalances(
+      [
+        account("loan", "Investment loan", "CREDIT_FACILITY"),
+        account("cash", "Chequing", "CASH"),
+        account("inv", "Brokerage", "INVESTMENT"),
+      ],
+      [bal("loan", "Ignored loan name", "CREDIT_FACILITY", "-3500000")],
+    );
+
+    expect(sortBalanceRows(rows).map((row) => row.accountId)).toEqual([
+      "inv",
+      "cash",
+      "loan",
+    ]);
+  });
+});
+
 function bal(
   accountId: string,
   accountName: string,
@@ -63,5 +104,21 @@ function bal(
     currency: "CAD",
     minor,
     minorUnits: 2,
+  };
+}
+
+function account(
+  id: string,
+  name: string,
+  type: AccountRecord["type"],
+): AccountRecord {
+  return {
+    id,
+    name,
+    type,
+    currency: "CAD",
+    minorUnits: 2,
+    taxTreatment: null,
+    closedAt: null,
   };
 }

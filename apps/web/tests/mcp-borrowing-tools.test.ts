@@ -92,6 +92,7 @@ function accountRepoFor(householdId: string, rows: AccountRecord[]) {
       requestedHouseholdId === householdId
         ? rows.find((row) => row.id === id) ?? null
         : null,
+    listCurrencies: async () => [],
     getCurrency: async () => null,
     create: async () => {
       throw new Error("not used");

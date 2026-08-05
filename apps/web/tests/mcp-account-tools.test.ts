@@ -34,6 +34,7 @@ function fakeAccountStore(seed: Map<string, AccountRecord[]>) {
       },
       getById: async (householdId: string, id: string) =>
         (store.get(householdId) ?? []).find((row) => row.id === id) ?? null,
+      listCurrencies: async () => CURRENCIES,
       getCurrency: async (code: string) => CURRENCIES.find((c) => c.code === code) ?? null,
       create: async (
         householdId: string,

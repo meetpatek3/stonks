@@ -1,5 +1,9 @@
-import { describe, expect, it } from "vitest";
-import { toAccountRecord } from "../src/repos/account-repo.js";
+import { describe, expect, expectTypeOf, it } from "vitest";
+import {
+  toAccountRecord,
+  type AccountRepo,
+  type CurrencyRecord,
+} from "../src/repos/account-repo.js";
 
 /**
  * The account repo's row→record mapping, exercised without a database.
@@ -47,5 +51,13 @@ describe("toAccountRecord", () => {
 
     expect(record.closedAt).toBeNull();
     expect(record.taxTreatment).toBeNull();
+  });
+});
+
+describe("AccountRepo", () => {
+  it("exposes currency reference data without household context", () => {
+    expectTypeOf<AccountRepo["listCurrencies"]>().toEqualTypeOf<
+      () => Promise<CurrencyRecord[]>
+    >();
   });
 });

@@ -35,6 +35,7 @@ function fakeAccounts(byHousehold: Map<string, AccountRecord[]>) {
     list: async (householdId: string) => byHousehold.get(householdId) ?? [],
     getById: async (householdId: string, id: string) =>
       (byHousehold.get(householdId) ?? []).find((row) => row.id === id) ?? null,
+    listCurrencies: async () => [],
     getCurrency: async () => null,
     create: async (): Promise<AccountRecord> => {
       throw new Error("not used by journal tools");
