@@ -39,9 +39,9 @@ export const getBorrowingSummaryTool = defineTool({
   name: "get_borrowing_summary",
   description:
     "Show replay-derived credit-facility balances, FACILITY_USES slices, effective rates, " +
-    "and modelled-versus-posted interest. Balances and posted interest are tagged ACTUAL; " +
-    "benchmark-derived rates and accrued interest are tagged MODELLED. Missing modelling " +
-    "inputs remain null with their read-model uncertainty reasons.",
+    "monthly interest over time, and modelled-versus-posted interest. Balances and posted " +
+    "interest are tagged ACTUAL; benchmark-derived rates and accrued interest are tagged " +
+    "MODELLED. Missing modelling inputs remain null with their read-model uncertainty reasons.",
   scope: "read",
   annotations: READ_ONLY,
   inputSchema: {
@@ -164,6 +164,27 @@ export const getBorrowingSummaryTool = defineTool({
                   "ACTUAL",
                 ),
         },
+        interestOverTime: facility.interestOverTime.map((point) => ({
+          month: point.month,
+          actual: taggedMoney(
+            point.actualMinor,
+            facility.currency,
+            facility.minorUnits,
+            "ACTUAL",
+          ),
+          modelled:
+            point.modelledMinor === null
+              ? null
+              : {
+                  ...taggedMoney(
+                    point.modelledMinor,
+                    facility.currency,
+                    facility.minorUnits,
+                    "MODELLED",
+                  ),
+                  modelledIsEstimate: point.modelledIsEstimate,
+                },
+        })),
         uncertaintyReasons: [
           ...facility.uncertaintyReasons,
           ...(actual === null

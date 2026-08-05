@@ -37,8 +37,22 @@ const JOURNAL_TYPES = [
   "OPENING",
 ] as const;
 
-/** The journal type list, shared with the write tools' input schema. */
+/** All journal types that may appear in journal history. */
 export const JOURNAL_TYPE_VALUES = JOURNAL_TYPES;
+
+/** Journal types whose ordinary posting shape can be persisted by record_journal. */
+export const JOURNAL_WRITE_TYPE_VALUES = [
+  "BUY",
+  "SELL",
+  "DIVIDEND",
+  "INTEREST_CHARGED",
+  "INTEREST_EARNED",
+  "FEE",
+  "TRANSFER",
+  "DEPOSIT",
+  "WITHDRAWAL",
+  "OPENING",
+] as const;
 
 const DEFAULT_LIMIT = 50;
 

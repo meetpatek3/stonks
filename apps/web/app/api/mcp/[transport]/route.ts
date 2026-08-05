@@ -3,7 +3,9 @@ import { createTokenRepo } from "@stonks/db";
 import { getDb } from "@/lib/db";
 import { authenticateMcpRequest } from "@/lib/mcp/auth";
 import { createToolContext } from "@/lib/mcp/context";
+import { MCP_BASE_PATH } from "@/lib/mcp/endpoint";
 import { registerTools } from "@/lib/mcp/registrar";
+import { registerMcpResources } from "@/lib/mcp/resources";
 import { MCP_TOOLS } from "@/lib/mcp/tools";
 
 /**
@@ -16,8 +18,8 @@ import { MCP_TOOLS } from "@/lib/mcp/tools";
  *
  * `middleware.ts` exempts `/api/mcp` from cookie auth; this route does its
  * own. Per request we authenticate, build a household-scoped tool context,
- * and hand a fresh MCP server (registered with exactly `MCP_TOOLS`) to
- * `mcp-handler`. Stateless mode (`sessionIdGenerator: undefined`) keeps the
+ * and hand a fresh MCP server with the declared tools and reference resources
+ * to `mcp-handler`. Stateless mode (`sessionIdGenerator: undefined`) keeps the
  * app self-hostable with no Redis.
  */
 async function handleMcp(request: Request): Promise<Response> {
@@ -42,13 +44,14 @@ async function handleMcp(request: Request): Promise<Response> {
   const handler = createMcpHandler(
     (server) => {
       registerTools(server, MCP_TOOLS, ctx);
+      registerMcpResources(server);
     },
     {
       serverInfo: { name: "stonks", version: "0.1.0" },
-      capabilities: { tools: {} },
+      capabilities: { tools: {}, resources: {} },
     },
     {
-      basePath: "/api/mcp",
+      basePath: MCP_BASE_PATH,
       disableSse: true,
       sessionIdGenerator: undefined,
     },

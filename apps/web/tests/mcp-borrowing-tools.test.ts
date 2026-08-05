@@ -137,6 +137,22 @@ describe("get_borrowing_summary", () => {
             actual: { amountMinor: string; basis: string };
           } | null;
         };
+        interestOverTime: Array<{
+          month: string;
+          actual: {
+            amountMinor: string;
+            currency: string | null;
+            minorUnits: number | null;
+            basis: string;
+          };
+          modelled: {
+            amountMinor: string;
+            currency: string | null;
+            minorUnits: number | null;
+            basis: string;
+            modelledIsEstimate: true;
+          } | null;
+        }>;
       }>;
     };
 
@@ -167,6 +183,24 @@ describe("get_borrowing_summary", () => {
       modelled: { amountMinor: "100", basis: "MODELLED" },
       actual: { amountMinor: "90", basis: "ACTUAL" },
     });
+    expect(facility.interestOverTime).toEqual([
+      {
+        month: "2024-01",
+        actual: {
+          amountMinor: "90",
+          currency: "CAD",
+          minorUnits: 2,
+          basis: "ACTUAL",
+        },
+        modelled: {
+          amountMinor: "100",
+          currency: "CAD",
+          minorUnits: 2,
+          basis: "MODELLED",
+          modelledIsEstimate: true,
+        },
+      },
+    ]);
     expect(calls).toEqual([{ householdId: "hh-a", options: { asOf: "2024-01-10" } }]);
   });
 

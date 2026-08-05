@@ -20,7 +20,7 @@ import {
   zTradeDate,
   minorFromString,
 } from "../schemas";
-import { JOURNAL_TYPE_VALUES, journalToWire } from "./journals-read";
+import { JOURNAL_WRITE_TYPE_VALUES, journalToWire } from "./journals-read";
 
 /**
  * Task 7 write tools — record_journal and supersede_journal (spec §8 tools
@@ -92,7 +92,11 @@ const zFacilityUseInput = z.object({
  * a caller silently reorder history.
  */
 const journalWriteShape = {
-  type: z.enum(JOURNAL_TYPE_VALUES),
+  type: z.enum(JOURNAL_WRITE_TYPE_VALUES, {
+    error:
+      "CORPORATE_ACTION is not yet supported by record_journal; use one of the supported " +
+      "ordinary posting journal types instead.",
+  }),
   tradeDate: zTradeDate,
   memo: z.string({ error: "must be a string" }).optional(),
   externalNaturalKey: z
@@ -226,14 +230,15 @@ async function buildPostedJournal(
 export const recordJournalTool = defineTool({
   name: "record_journal",
   description:
-    "Record a journal of any type (BUY, SELL, DIVIDEND, INTEREST_CHARGED, INTEREST_EARNED, " +
-    "FEE, TRANSFER, DEPOSIT, WITHDRAWAL, CORPORATE_ACTION, OPENING) from balanced postings — " +
+    "Record a supported ordinary-posting journal type (BUY, SELL, DIVIDEND, INTEREST_CHARGED, " +
+    "INTEREST_EARNED, FEE, TRANSFER, DEPOSIT, WITHDRAWAL, OPENING) from balanced postings — " +
     "never a balance; balances are derived by replay. Amounts are minor-unit strings in the " +
     "household reporting currency; quantities are decimal strings; FX is a rational " +
     "fxRateN/fxRateD pair. Postings must sum to zero and any credit-facility draw must be " +
     "fully covered by facilityUses. sortKey is assigned server-side. When externalNaturalKey " +
     "already exists, the existing journal id is returned with duplicate: true instead of " +
-    "double-posting. Opening positions with unknown cost are legal — omit the cost fields.",
+    "double-posting. Opening positions with unknown cost are legal — omit the cost fields. " +
+    "Corporate-action payloads are not yet supported.",
   scope: "read_write",
   annotations: ADDITIVE,
   inputSchema: journalWriteShape,

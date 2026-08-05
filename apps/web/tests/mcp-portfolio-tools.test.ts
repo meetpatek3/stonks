@@ -252,6 +252,37 @@ describe("get_portfolio_overview", () => {
     expect(series.every((point) => point.valueMinor === "500000")).toBe(true);
   });
 
+  it("passes through valuation nulls and separate uncertainty and stale reasons", async () => {
+    const valuation = {
+      ...SNAPSHOT_A.valuation,
+      marketValueMinor: null,
+      costBasisMinor: null,
+      unrealizedGainMinor: null,
+      interestCostMinor: null,
+      feeCostMinor: null,
+      grossReturnBps: null,
+      netReturnBps: null,
+      pricedAsOf: null,
+      hasStalePrice: true,
+      isUncertain: true,
+      uncertaintyReasons: ["A price is unavailable."],
+      staleReasons: ["XEQT is priced as of 2024-01-04."],
+    };
+    const ctx = makeTestCtx({
+      householdId: "hh-a",
+      repos: { portfolio: { getSnapshot: async () => ({ ...SNAPSHOT_A, valuation }) } },
+    });
+
+    const result = await invokeTool(getPortfolioOverviewTool, ctx, {});
+    const out = result.structuredContent as { valuation: typeof valuation };
+
+    expect(out.valuation).toEqual(valuation);
+    expect(out.valuation.marketValueMinor).toBeNull();
+    expect(out.valuation.grossReturnBps).toBeNull();
+    expect(out.valuation.uncertaintyReasons).toEqual(["A price is unavailable."]);
+    expect(out.valuation.staleReasons).toEqual(["XEQT is priced as of 2024-01-04."]);
+  });
+
   it("is scoped to the token's household: B's token gets B's snapshot, never A's", async () => {
     const snaps = snapshots();
     const ctx = makeTestCtx({ householdId: "hh-b", repos: { portfolio: snaps } });

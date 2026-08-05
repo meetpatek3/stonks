@@ -171,7 +171,7 @@ plan touches), `apps/web/package.json` (add `mcp-handler`, `@modelcontextprotoco
 3. Register `ping` (read scope) returning server name + household reporting currency (via a
    repo call, proving DB scoping works end to end).
 4. Add the middleware exemption. Verify: tests, build, typecheck; manually confirm
-   `curl -X POST /api/mcp` without a token → 401 in `pnpm --filter @stonks/web dev` if a local
+   `curl -X POST /api/mcp/mcp` without a token → 401 in `pnpm --filter @stonks/web dev` if a local
    DB is available (optional smoke, not the test gate).
 
 ---

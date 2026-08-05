@@ -37,6 +37,7 @@ describe("get_tax_year_summary", () => {
             calls.push({ householdId, options });
             return {
               ...(await makeTestCtx().repos.portfolio.getSnapshot(householdId)),
+              reportingMinorUnits: 2,
               ...(await Promise.resolve({ taxSummary: TAX_SUMMARY })),
             };
           },
@@ -54,11 +55,15 @@ describe("get_tax_year_summary", () => {
       summary: TaxSummary;
       flags: TaxSummary["flags"];
       disclaimer: string;
+      reportingCurrency: string | null;
+      reportingMinorUnits: number | null;
     };
     assertMoneyFieldsAreStrings(out);
     expect(out.summary).toEqual(TAX_SUMMARY);
     expect(out.flags).toBe(TAX_SUMMARY.flags);
     expect(out.disclaimer).toBe("This is not tax advice.");
+    expect(out.reportingCurrency).toBe("CAD");
+    expect(out.reportingMinorUnits).toBe(2);
     expect(result.content[0]?.text).toContain("This is not tax advice.");
     expect(calls).toEqual([{ householdId: "hh-a", options: { taxYear: 2024 } }]);
   });

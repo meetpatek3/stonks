@@ -4,6 +4,7 @@ import { createDb, createTokenRepo } from "@stonks/db";
 import { account, apiToken, currency, household, journal, journalFacilityUse, posting } from "@stonks/db";
 import { loadEnv } from "@/lib/env";
 import { POST } from "@/app/api/mcp/[transport]/route";
+import { MCP_CONNECTION_PATH } from "@/lib/mcp/endpoint";
 import { MCP_TOOLS } from "@/lib/mcp/tools";
 
 /**
@@ -54,7 +55,7 @@ function rpcRequest(token: string | null, method: string, params?: unknown): Pro
   };
   if (token !== null) headers.authorization = `Bearer ${token}`;
   return POST(
-    new Request("http://localhost/api/mcp/mcp", {
+    new Request(`http://localhost${MCP_CONNECTION_PATH}`, {
       method: "POST",
       headers,
       body: JSON.stringify({ jsonrpc: "2.0", id: requestId, method, ...(params ? { params } : {}) }),
@@ -155,7 +156,7 @@ describeIfDb("MCP integration (real Postgres, real route handler)", () => {
       for (const header of ["Basic abc", "Bearer", "not-a-scheme"]) {
         requestId += 1;
         const res = await POST(
-          new Request("http://localhost/api/mcp/mcp", {
+          new Request(`http://localhost${MCP_CONNECTION_PATH}`, {
             method: "POST",
             headers: { "content-type": "application/json", authorization: header },
             body: JSON.stringify({ jsonrpc: "2.0", id: requestId, method: "initialize", params: INITIALIZE_PARAMS }),

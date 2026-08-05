@@ -15,6 +15,7 @@ import { EmptyState } from "@heroui-pro/react/empty-state";
 import { Icon } from "@iconify/react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { MCP_CONNECTION_PATH } from "@/lib/mcp/endpoint";
 
 /**
  * Settings screen — MCP personal access tokens.
@@ -254,8 +255,8 @@ export function SettingsScreen({ tokens, message }: SettingsScreenProps) {
                     </EmptyState.Media>
                     <EmptyState.Title>No tokens yet</EmptyState.Title>
                     <EmptyState.Description>
-                      Create a token above, then point your agent at /api/mcp with it as a
-                      bearer token.
+                      Create a token above, then point your agent at{" "}
+                      {MCP_CONNECTION_PATH} with it as a bearer token.
                     </EmptyState.Description>
                   </EmptyState.Header>
                 </EmptyState>

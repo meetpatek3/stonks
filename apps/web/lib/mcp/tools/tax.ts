@@ -54,6 +54,8 @@ export const getTaxYearSummaryTool = defineTool({
         },
       ],
       structuredContent: {
+        reportingCurrency: snapshot.reportingCurrency ?? null,
+        reportingMinorUnits: snapshot.reportingMinorUnits,
         summary,
         flags: summary?.flags ?? [],
         disclaimer: DISCLAIMER,

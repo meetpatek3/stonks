@@ -327,6 +327,26 @@ describe("record_journal", () => {
     expect(store.calls).toHaveLength(0);
   });
 
+  it("rejects CORPORATE_ACTION as explicitly unsupported", async () => {
+    expect(recordJournalTool.description).toContain("not yet supported");
+
+    const store = fakeJournalStore(new Map([["hh-a", seedJournals()]]));
+    const result = await invokeTool(recordJournalTool, ctxFor(store), {
+      type: "CORPORATE_ACTION",
+      tradeDate: "2024-01-11",
+      postings: [
+        { accountId: "world", amountMinor: "-50000" },
+        { accountId: "cash", amountMinor: "50000" },
+      ],
+    });
+
+    const out = err(result);
+    expect(out.code).toBe("INVALID_INPUT");
+    expect(out.message).toContain("CORPORATE_ACTION");
+    expect(out.message).toContain("not yet supported");
+    expect(store.calls).toHaveLength(0);
+  });
+
   it("returns the existing journal id with duplicate: true for a known externalNaturalKey", async () => {
     const store = fakeJournalStore(new Map([["hh-a", seedJournals()]]));
     const result = await invokeTool(recordJournalTool, ctxFor(store), {

@@ -31,8 +31,9 @@ export const getPortfolioOverviewTool = defineTool({
   description:
     "Net worth, total invested and total borrowed (minor-unit strings in the reporting " +
     "currency), balances grouped by account type, open-item counts, the cost-based " +
-    "allocation split, and month-end value over time. All figures are derived by " +
-    "replaying the household's posted journals.",
+    "allocation split, month-end value over time, and portfolio valuation including " +
+    "market value, unrealized gain, gross return, and return net of all costs. All " +
+    "figures are derived by replaying the household's posted journals.",
   scope: "read",
   annotations: READ_ONLY,
   inputSchema: {},
@@ -68,6 +69,7 @@ export const getPortfolioOverviewTool = defineTool({
         allocationBasis: snap.allocationBasis,
         allocationIsIncomplete: snap.allocationIsIncomplete,
         valueOverTime: snap.valueOverTime,
+        valuation: snap.valuation,
       },
     };
   },
