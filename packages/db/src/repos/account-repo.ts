@@ -31,6 +31,8 @@ export interface AccountRepo {
   list(householdId: string, options?: { includeClosed?: boolean }): Promise<AccountRecord[]>;
   /** Single fetch, household-scoped: a foreign id returns null. */
   getById(householdId: string, id: string): Promise<AccountRecord | null>;
+  /** Currency reference data is global, so account forms need no household context. */
+  listCurrencies(): Promise<CurrencyRecord[]>;
   /** A known currency by ISO code, or null — the FK source for account currencies. */
   getCurrency(code: string): Promise<CurrencyRecord | null>;
   /**
@@ -121,6 +123,11 @@ export function createAccountRepo(db: Db): AccountRepo {
     },
 
     getById,
+
+    async listCurrencies() {
+      return db.select().from(currency).orderBy(asc(currency.code));
+    },
+
     getCurrency,
 
     async create(householdId, input) {

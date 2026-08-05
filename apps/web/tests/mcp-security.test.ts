@@ -222,6 +222,9 @@ function buildWorld() {
       calls.push({ repo: "accounts", method: "getById", householdId });
       return (accountStore.get(householdId) ?? []).find((r) => r.id === id) ?? null;
     },
+    listCurrencies: async () => [
+      { code: "CAD", minorUnits: 2, name: "Canadian Dollar" },
+    ],
     getCurrency: async (code: string) =>
       code === "CAD" ? { code: "CAD", minorUnits: 2, name: "Canadian Dollar" } : null,
     create: async (householdId: string, input: { name: string; type: AccountRecord["type"]; currency: string; taxTreatment?: string | null }) => {

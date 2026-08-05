@@ -4,6 +4,7 @@
 .superpowers/
 
 node_modules/
+.pnpm-store/
 dist/
 .next/
 *.tsbuildinfo

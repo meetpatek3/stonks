@@ -47,6 +47,7 @@ export function makeTestCtx(overrides?: {
       accounts: {
         list: async () => [],
         getById: async () => null,
+        listCurrencies: async () => [],
         getCurrency: async () => null,
         create: async () => {
           throw new Error("accounts.create not stubbed in this test");

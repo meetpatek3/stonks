@@ -33,7 +33,7 @@ describeIfDb("account repo (integration)", () => {
       .insert(currency)
       .values([
         { code: "CAD", minorUnits: 2, name: "Canadian Dollar" },
-        { code: "USD", minorUnits: 2, name: "US Dollar" },
+        { code: "USD", minorUnits: 2, name: "United States Dollar" },
       ])
       .onConflictDoNothing();
     await db.insert(household).values([
@@ -167,6 +167,18 @@ describeIfDb("account repo (integration)", () => {
 
   it("getCurrency returns known currencies and null for unknown ones", async () => {
     expect(await repo.getCurrency("CAD")).toMatchObject({ code: "CAD", minorUnits: 2 });
-    expect(await repo.getCurrency("EUR")).toBeNull();
+    expect(await repo.getCurrency("ZZZ")).toBeNull();
+  });
+
+  it("lists currencies ordered by code", async () => {
+    const rows = await repo.listCurrencies();
+    const codes = rows.map((row) => row.code);
+
+    expect(codes).toEqual([...codes].sort());
+    expect(rows.find((row) => row.code === "CAD")).toMatchObject({
+      minorUnits: 2,
+      name: "Canadian Dollar",
+    });
+    expect(rows.find((row) => row.code === "USD")).toMatchObject({ minorUnits: 2 });
   });
 });
