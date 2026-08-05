@@ -686,28 +686,42 @@ describe("scope enforcement", () => {
       const world = buildWorld();
       const handler = vi.fn(def.handler as AnyToolDefinition["handler"]);
       const spied: AnyToolDefinition = { ...def, handler };
+      const validInputByTool: Record<string, unknown> = {
+        record_journal: {
+          type: "DEPOSIT",
+          tradeDate: "2024-03-01",
+          postings: [
+            { accountId: "a-world", amountMinor: "-1" },
+            { accountId: "a-cash", amountMinor: "1" },
+          ],
+        },
+        supersede_journal: {
+          journalId: "ja-fee",
+          replacement: {
+            type: "DEPOSIT",
+            tradeDate: "2024-03-01",
+            postings: [
+              { accountId: "a-world", amountMinor: "-1" },
+              { accountId: "a-cash", amountMinor: "1" },
+            ],
+          },
+          confirm: true,
+        },
+        create_account: { name: "x", type: "CASH", currency: "CAD" },
+        close_account: { accountId: "a-empty", confirm: true },
+      };
+      const input = validInputByTool[def.name];
+      expect(input, `missing valid scope probe for ${def.name}`).toBeDefined();
 
-      const result = await invokeTool(spied, world.ctx(HH_A, "read"), {
-        // Even a fully valid-looking payload must not matter: scope is
-        // checked before parsing and before the handler.
-        journalId: "ja-fee",
-        accountId: "a-empty",
-        confirm: true,
-        type: "DEPOSIT",
-        tradeDate: "2024-03-01",
-        postings: [
-          { accountId: "a-world", amountMinor: "-1" },
-          { accountId: "a-cash", amountMinor: "1" },
-        ],
-        name: "x",
-        currency: "CAD",
-      });
+      // Even a fully valid payload must not matter: scope is checked before
+      // parsing and before the handler.
+      const result = await invokeTool(spied, world.ctx(HH_A, "read"), input);
 
-      expect(result.isError).toBe(true);
-      expect(result.structuredContent).toMatchObject({ code: "SCOPE_DENIED" });
       expect(handler).not.toHaveBeenCalled();
       expect(world.calls).toEqual([]);
       expect(world.writes).toEqual([]);
+      expect(result.isError).toBe(true);
+      expect(result.structuredContent).toMatchObject({ code: "SCOPE_DENIED" });
     },
   );
 
@@ -772,10 +786,10 @@ describe("write safety", () => {
       ],
     });
 
-    expect(err(result).code).toBe("UNBALANCED_JOURNAL");
     expect(world.writes).toEqual([]);
     // No trace persists: not the journal, not a natural-key tombstone.
     expect(world.journalStore.get(HH_A)).toHaveLength(3);
+    expect(err(result).code).toBe("UNBALANCED_JOURNAL");
     const readBack = await invokeTool(tool("list_journals"), world.ctx(HH_A, "read"), {
       includeSuperseded: true,
     });
@@ -798,10 +812,10 @@ describe("write safety", () => {
       confirm: true,
     });
 
-    expect(err(result).code).toBe("UNBALANCED_JOURNAL");
     expect(world.writes).toEqual([]);
     expect(world.journalStore.get(HH_A)!.find((j) => j.id === "ja-fee")!.status).toBe("POSTED");
     expect(world.journalStore.get(HH_A)).toHaveLength(3);
+    expect(err(result).code).toBe("UNBALANCED_JOURNAL");
   });
 
   it("a client-supplied sortKey is never honoured — rejected at the schema boundary", async () => {
