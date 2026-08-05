@@ -1,7 +1,8 @@
-import { createAccountRepo } from "@stonks/db";
+import { createAccountRepo, createFacilityTermsRepo } from "@stonks/db";
 import { AccountsScreen } from "@/components/accounts-screen";
 import { getSession } from "@/lib/auth/session";
 import { getDb } from "@/lib/db";
+import { todayIsoDate } from "@/lib/journals";
 import { emptyPortfolioSnapshot } from "@/lib/portfolio-shared";
 import { getPortfolioSnapshot } from "@/lib/portfolio";
 
@@ -39,10 +40,13 @@ export default async function AccountsPage({
   const params = await searchParams;
   const includeClosed = params.includeClosed === "true";
   const repo = createAccountRepo(db);
-  const [snapshot, accounts, currencies] = await Promise.all([
+  const facilityRepo = createFacilityTermsRepo(db);
+  const asOf = todayIsoDate();
+  const [snapshot, accounts, currencies, effectiveTerms] = await Promise.all([
     getPortfolioSnapshot(db, session.householdId),
     repo.list(session.householdId, { includeClosed }),
     repo.listCurrencies(),
+    facilityRepo.listEffectiveTerms(session.householdId, asOf),
   ]);
 
   return (
@@ -51,6 +55,9 @@ export default async function AccountsPage({
       accounts={accounts}
       currencies={currencies}
       includeClosed={includeClosed}
+      facilityTermsAccountIds={effectiveTerms.map(
+        (row) => row.terms.facilityAccountId,
+      )}
     />
   );
 }
