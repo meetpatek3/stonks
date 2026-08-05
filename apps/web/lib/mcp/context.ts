@@ -1,11 +1,12 @@
 import {
   createAccountRepo,
   createJournalRepo,
+  createPriceRepo,
   eq,
   household,
   type Db,
 } from "@stonks/db";
-import { getPortfolioSnapshot } from "@/lib/portfolio";
+import { getInterestAttribution, getPortfolioSnapshot } from "@/lib/portfolio";
 import type { HouseholdInfoRepo, McpToolContext } from "./registrar";
 import type { McpAuth } from "./auth";
 
@@ -42,8 +43,14 @@ export function createToolContext(db: Db, auth: McpAuth): McpToolContext {
       portfolio: {
         // The same request-scoped read model the pages use; every figure in
         // it is derived by replay, never stored.
-        getSnapshot: (householdId) => getPortfolioSnapshot(db, householdId),
+        getSnapshot: (householdId, options) =>
+          getPortfolioSnapshot(db, householdId, options?.taxYear, options?.asOf),
       },
+      interest: {
+        getAttribution: (householdId, periodStart, periodEnd) =>
+          getInterestAttribution(db, householdId, periodStart, periodEnd),
+      },
+      prices: createPriceRepo(db),
       accounts: createAccountRepo(db),
       // One journal repo instance backs both the narrowed read and write
       // interfaces; the repo has no update/delete path by design.

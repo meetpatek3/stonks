@@ -21,6 +21,7 @@ export {
   createPriceRepo,
   type PriceRepo,
   type PriceOverrideInput,
+  type SecurityPriceRecord,
 } from "./repos/price-repo";
 export {
   createFacilityTermsRepo,

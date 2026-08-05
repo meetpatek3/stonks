@@ -9,6 +9,12 @@ import {
 import { getJournalTool, listJournalsTool } from "./journals-read";
 import { recordJournalTool, supersedeJournalTool } from "./journals-write";
 import { closeAccountTool, createAccountTool } from "./accounts";
+import {
+  getBorrowingSummaryTool,
+  getInterestAttributionTool,
+} from "./borrowing";
+import { getTaxYearSummaryTool } from "./tax";
+import { getPriceTool, setPriceOverrideTool } from "./prices";
 
 /**
  * The MCP tool registry. Later tasks add their tools here; the route
@@ -27,4 +33,9 @@ export const MCP_TOOLS: ReadonlyArray<AnyToolDefinition> = [
   supersedeJournalTool,
   createAccountTool,
   closeAccountTool,
+  getBorrowingSummaryTool,
+  getInterestAttributionTool,
+  getTaxYearSummaryTool,
+  getPriceTool,
+  setPriceOverrideTool,
 ];

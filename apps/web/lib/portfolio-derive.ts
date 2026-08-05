@@ -13,6 +13,7 @@ import {
   qtyToDecimalString,
   rateBpsOnDate,
   replay,
+  facilitySlicesAsOf,
   replayFacilitySlices,
   sortJournals,
   summarizeCanadaTaxYear,
@@ -125,6 +126,143 @@ export type FacilityTermsInput = {
   terms: FacilityTerms;
   benchmarkCurve: readonly BenchmarkRatePoint[];
 };
+
+export type InterestAttributionReadModel = {
+  periodStart: string;
+  periodEnd: string;
+  reportingCurrency: string;
+  reportingMinorUnits: number | null;
+  /** Actual investment-use interest, or null when its inputs are incomplete. */
+  investmentInterestMinor: string | null;
+  actualInterestJournalIds: string[];
+  allocations: Array<{
+    accountId: string;
+    securityId: string;
+    interestMinor: string;
+    dollarDaysReporting: string;
+    sourceJournalIds: string[];
+  }>;
+  unallocatedMinor: string | null;
+  uncertaintyReasons: string[];
+};
+
+/**
+ * Read-model boundary for the MCP interest-attribution query.
+ *
+ * The tool needs a date range, while the portfolio snapshot only exposes
+ * inception/current valuation. This function assembles the actual investment
+ * share from posted interest-use lines and delegates dollar-day allocation to
+ * the ledger's `attributeInvestmentInterest`.
+ */
+export function deriveInterestAttribution(input: {
+  reportingCurrency: string;
+  reportingMinorUnits?: number;
+  accounts: readonly AccountMeta[];
+  journals: readonly Journal[];
+  periodStart: string;
+  periodEnd: string;
+}): InterestAttributionReadModel {
+  if (input.periodEnd <= input.periodStart) {
+    throw new Error("periodEnd must be after periodStart");
+  }
+
+  const ledgerAccounts = new Map<string, Account>(
+    input.accounts.map((meta) => [
+      meta.id,
+      { id: meta.id, type: meta.type, currency: meta.currency },
+    ]),
+  );
+  const posted = sortJournals(input.journals);
+  const facilityIds = input.accounts
+    .filter((meta) => meta.type === "CREDIT_FACILITY")
+    .map((meta) => meta.id);
+  const actualInterestJournalIds = new Set<string>();
+
+  for (const facilityAccountId of facilityIds) {
+    for (const journalId of actualInterestCharged({
+      journals: posted,
+      accounts: ledgerAccounts,
+      facilityAccountId,
+      periodStart: input.periodStart,
+      periodEnd: input.periodEnd,
+    }).actualJournalIds) {
+      actualInterestJournalIds.add(journalId);
+    }
+  }
+
+  let investmentInterestMinor = 0n;
+  let investmentInterestIsKnown = true;
+  const uncertaintyReasons: string[] = [];
+
+  for (const journal of posted) {
+    if (!actualInterestJournalIds.has(journal.id)) continue;
+    if (!journal.facilityUses || journal.facilityUses.length === 0) {
+      investmentInterestIsKnown = false;
+      uncertaintyReasons.push(
+        `${journal.id}: interest was charged with no facility-use attribution, so ` +
+          `the investment share cannot be derived.`,
+      );
+      continue;
+    }
+
+    for (const line of journal.facilityUses) {
+      if (line.use !== "INVESTMENT") continue;
+      if (line.amount.currency !== input.reportingCurrency) {
+        investmentInterestIsKnown = false;
+        uncertaintyReasons.push(
+          `${journal.id}: investment-use interest is in ${line.amount.currency} and no ` +
+            `rate is available to convert it to ${input.reportingCurrency}.`,
+        );
+        continue;
+      }
+      investmentInterestMinor += line.amount.minor;
+    }
+  }
+
+  const investmentInterestJournalIds = posted
+    .filter((journal) => actualInterestJournalIds.has(journal.id))
+    .map((journal) => journal.id);
+
+  if (!investmentInterestIsKnown) {
+    return {
+      periodStart: input.periodStart,
+      periodEnd: input.periodEnd,
+      reportingCurrency: input.reportingCurrency,
+      reportingMinorUnits: input.reportingMinorUnits ?? null,
+      investmentInterestMinor: null,
+      actualInterestJournalIds: investmentInterestJournalIds,
+      allocations: [],
+      unallocatedMinor: null,
+      uncertaintyReasons,
+    };
+  }
+
+  const attributed = attributeInvestmentInterest({
+    journals: posted,
+    accounts: ledgerAccounts,
+    periodStart: input.periodStart,
+    periodEnd: input.periodEnd,
+    investmentInterestMinor,
+  });
+
+  return {
+    periodStart: input.periodStart,
+    periodEnd: input.periodEnd,
+    reportingCurrency: input.reportingCurrency,
+    reportingMinorUnits: input.reportingMinorUnits ?? null,
+    investmentInterestMinor: investmentInterestMinor.toString(),
+    actualInterestJournalIds: investmentInterestJournalIds,
+    allocations: attributed.allocations.map((allocation) => ({
+      accountId: allocation.accountId,
+      securityId: allocation.securityId,
+      interestMinor: allocation.interestMinor.toString(),
+      dollarDaysReporting: allocation.dollarDaysReporting.toString(),
+      sourceJournalIds: allocation.sourceJournalIds,
+    })),
+    unallocatedMinor: attributed.unallocatedMinor.toString(),
+    uncertaintyReasons,
+  };
+}
 
 /** Basis-point denominator: allocation shares always sum to this. */
 const TOTAL_BPS = 10_000n;
@@ -1358,7 +1496,10 @@ function deriveFacilityBorrowing(args: {
   const { meta, journals, ledgerAccounts, termsInput, asOf } = args;
   const uncertaintyReasons: string[] = [];
 
-  const slices = replayFacilitySlices(journals, ledgerAccounts, meta.id);
+  const slices =
+    asOf === null
+      ? replayFacilitySlices(journals, ledgerAccounts, meta.id)
+      : facilitySlicesAsOf(journals, ledgerAccounts, meta.id, asOf);
   const outstanding =
     slices.facilityBalanceMinor < 0n ? -slices.facilityBalanceMinor : 0n;
   const useBreakdown = useBreakdownFromSlices(slices.slices, outstanding);
@@ -1373,6 +1514,7 @@ function deriveFacilityBorrowing(args: {
   // as zero (no charged activity to window), not unknown.
   let interestChargedYtdMinor = 0n;
   let investmentInterestYtdMinor: bigint | null = 0n;
+  let actualInterestJournalIds: string[] = [];
   let periodStart: string | null = null;
   let periodEnd: string | null = null;
 
@@ -1390,6 +1532,7 @@ function deriveFacilityBorrowing(args: {
     });
     interestChargedYtdMinor = ytd.actualPostedMinor;
     investmentInterestYtdMinor = ytd.investmentMinor;
+    actualInterestJournalIds = ytd.actualJournalIds;
     uncertaintyReasons.push(...ytd.uncertaintyReasons);
   }
 
@@ -1449,6 +1592,7 @@ function deriveFacilityBorrowing(args: {
         investmentShareBps,
         effectiveRateBps: null,
         interestChargedYtdMinor: interestChargedYtdMinor.toString(),
+        actualInterestJournalIds,
         investmentInterestYtdMinor:
           investmentInterestYtdMinor === null
             ? null
@@ -1485,6 +1629,7 @@ function deriveFacilityBorrowing(args: {
         periodEnd: result.periodEnd,
         modelledTotalMinor: result.modelledTotalMinor.toString(),
         actualPostedMinor: result.actualPostedMinor.toString(),
+        actualJournalIds: result.actualJournalIds,
         varianceMinor: result.varianceMinor.toString(),
         modelledByUse,
         modelledIsEstimate: true,
@@ -1509,6 +1654,7 @@ function deriveFacilityBorrowing(args: {
     investmentShareBps,
     effectiveRateBps,
     interestChargedYtdMinor: interestChargedYtdMinor.toString(),
+    actualInterestJournalIds,
     investmentInterestYtdMinor:
       investmentInterestYtdMinor === null
         ? null
@@ -1551,6 +1697,7 @@ function actualInterestYtd(args: {
 }): {
   actualPostedMinor: bigint;
   investmentMinor: bigint | null;
+  actualJournalIds: string[];
   uncertaintyReasons: string[];
 } {
   const { journals, accounts, facilityAccountId, periodStart, periodEnd } = args;
@@ -1586,6 +1733,7 @@ function actualInterestYtd(args: {
   return {
     actualPostedMinor,
     investmentMinor: investmentUnknown ? null : investmentMinor,
+    actualJournalIds,
     uncertaintyReasons,
   };
 }

@@ -1,12 +1,20 @@
 import { and, desc, eq, lte, sql } from "drizzle-orm";
 import type { PriceOverride, PriceQuote } from "@stonks/ledger";
 import type { Db } from "../client.js";
-import { priceOverride, priceQuote } from "../schema/index.js";
+import { currency, priceOverride, priceQuote, security } from "../schema/index.js";
 
 /** A manual price as entered: the domain override plus the audit trail of who recorded it. */
 export type PriceOverrideInput = PriceOverride & { createdBy: string };
 
+export type SecurityPriceRecord = {
+  id: string;
+  currency: string;
+  minorUnits: number;
+};
+
 export interface PriceRepo {
+  /** Shared security identity and its own price currency. */
+  getSecurity(securityId: string): Promise<SecurityPriceRecord | null>;
   /**
    * Manual prices for a household, latest-first per (security, as_of) with superseded rows
    * filtered out, so `resolvePrice` sees exactly one override per security and date.
@@ -26,6 +34,19 @@ export interface PriceRepo {
 
 export function createPriceRepo(db: Db): PriceRepo {
   return {
+    async getSecurity(securityId) {
+      const [row] = await db
+        .select({
+          id: security.id,
+          currency: security.currency,
+          minorUnits: currency.minorUnits,
+        })
+        .from(security)
+        .innerJoin(currency, eq(security.currency, currency.code))
+        .where(eq(security.id, securityId))
+        .limit(1);
+      return row ?? null;
+    },
     async listOverrides(householdId) {
       const rows = await db
         .selectDistinctOn([priceOverride.securityId, priceOverride.asOf])

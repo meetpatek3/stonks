@@ -1,7 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { AccountRepo, ApiTokenScope, JournalListFilters } from "@stonks/db";
-import type { Journal } from "@stonks/ledger";
+import type { Journal, PriceOverride, PriceQuote } from "@stonks/ledger";
 import { z } from "zod";
+import type { InterestAttributionReadModel } from "@/lib/portfolio-derive";
 import type { PortfolioSnapshot } from "@/lib/portfolio-shared";
 import { toolError, toToolError } from "./errors";
 
@@ -53,7 +54,36 @@ export interface HouseholdInfoRepo {
  * balance, cost basis, or return themselves.
  */
 export interface PortfolioSnapshotRepo {
-  getSnapshot(householdId: string): Promise<PortfolioSnapshot>;
+  getSnapshot(
+    householdId: string,
+    options?: { taxYear?: number; asOf?: string },
+  ): Promise<PortfolioSnapshot>;
+}
+
+/** Read-model attribution, kept separate from snapshot reads because it has a date range. */
+export interface InterestAttributionRepo {
+  getAttribution(
+    householdId: string,
+    periodStart: string,
+    periodEnd: string,
+  ): Promise<InterestAttributionReadModel>;
+}
+
+/** The price persistence seam used by the MCP read and override tools. */
+export interface McpPriceRepo {
+  getSecurity(
+    securityId: string,
+  ): Promise<{ id: string; currency: string; minorUnits: number } | null>;
+  listOverrides(householdId: string): Promise<PriceOverride[]>;
+  latestQuoteAsOf(
+    securityId: string,
+    currency: string,
+    asOf: string,
+  ): Promise<PriceQuote | null>;
+  insertOverride(
+    householdId: string,
+    override: PriceOverride & { createdBy: string },
+  ): Promise<void>;
 }
 
 /** The journal-history reads, narrowed from `JournalRepo` so fakes stay small. */
@@ -83,6 +113,8 @@ export interface JournalWriteRepo {
 export interface McpRepos {
   household: HouseholdInfoRepo;
   portfolio: PortfolioSnapshotRepo;
+  interest: InterestAttributionRepo;
+  prices: McpPriceRepo;
   accounts: AccountRepo;
   journals: JournalReadRepo;
   journalWrites: JournalWriteRepo;

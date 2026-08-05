@@ -318,6 +318,48 @@ function buildWorld() {
     },
   };
 
+  const interest = {
+    getAttribution: async (householdId: string, periodStart: string, periodEnd: string) => {
+      calls.push({ repo: "interest", method: "getAttribution", householdId });
+      return {
+        periodStart,
+        periodEnd,
+        reportingCurrency: "CAD",
+        reportingMinorUnits: 2,
+        investmentInterestMinor: "0",
+        actualInterestJournalIds: [],
+        allocations: [],
+        unallocatedMinor: "0",
+        uncertaintyReasons: [],
+      };
+    },
+  };
+
+  const prices = {
+    getSecurity: async (securityId: string) =>
+      securityId === "XEQT" || securityId === "BSECRET"
+        ? { id: securityId, currency: "CAD", minorUnits: 2 }
+        : null,
+    listOverrides: async (householdId: string) => {
+      calls.push({ repo: "prices", method: "listOverrides", householdId });
+      return [];
+    },
+    latestQuoteAsOf: async (securityId: string, currency: string, asOf: string) =>
+      securityId === "XEQT" || securityId === "BSECRET"
+        ? {
+            securityId,
+            currency,
+            asOf,
+            priceMinor: 100n,
+            source: "fixture",
+            fetchedAt: "2024-01-05T00:00:00.000Z",
+          }
+        : null,
+    insertOverride: async (householdId: string) => {
+      writes.push({ repo: "prices", method: "insertOverride", householdId });
+    },
+  };
+
   const household = {
     getReportingCurrency: async (householdId: string) => {
       calls.push({ repo: "household", method: "getReportingCurrency", householdId });
@@ -328,7 +370,7 @@ function buildWorld() {
   const ctx = (householdId: string, scope: "read" | "read_write"): McpToolContext => ({
     householdId,
     scope,
-    repos: { household, portfolio, accounts, journals, journalWrites },
+    repos: { household, portfolio, interest, prices, accounts, journals, journalWrites },
   });
 
   return { ctx, calls, writes, accountStore, journalStore };
@@ -443,6 +485,10 @@ describe("tenant isolation — reads", () => {
     ["list_journals", { includeSuperseded: true }],
     ["list_journals", { accountId: "a-cash" }],
     ["get_journal", { journalId: "ja-fee" }],
+    ["get_borrowing_summary", {}],
+    ["get_interest_attribution", { from: "2024-01-01", to: "2024-01-02" }],
+    ["get_tax_year_summary", { year: 2024 }],
+    ["get_price", { securityId: "XEQT", currency: "CAD", asOf: "2024-01-05" }],
   ];
 
   it.each(readCases)("%s %j returns only household A's data to A's token", async (name, input) => {
@@ -465,7 +511,8 @@ describe("tenant isolation — reads", () => {
       JSON.stringify(inputRaw)
         .replaceAll("a-brokerage", "b-invest")
         .replaceAll("a-cash", "b-cash")
-        .replaceAll("ja-fee", "jb-deposit"),
+        .replaceAll("ja-fee", "jb-deposit")
+        .replaceAll("XEQT", "BSECRET"),
     ) as unknown;
     const world = buildWorld();
     const result = await invokeTool(tool(name), world.ctx(HH_B, "read"), input);
@@ -675,6 +722,7 @@ describe("scope enforcement", () => {
       "close_account",
       "create_account",
       "record_journal",
+      "set_price_override",
       "supersede_journal",
     ]);
     expect(readTools.length).toBeGreaterThan(0);
@@ -709,6 +757,13 @@ describe("scope enforcement", () => {
         },
         create_account: { name: "x", type: "CASH", currency: "CAD" },
         close_account: { accountId: "a-empty", confirm: true },
+        set_price_override: {
+          securityId: "XEQT",
+          asOf: "2024-03-01",
+          priceMinor: "100",
+          currency: "CAD",
+          note: "scope probe",
+        },
       };
       const input = validInputByTool[def.name];
       expect(input, `missing valid scope probe for ${def.name}`).toBeDefined();
@@ -1027,6 +1082,10 @@ describe("privilege boundaries", () => {
       ["list_open_items", {}],
       ["list_journals", { includeSuperseded: true }],
       ["get_journal", { journalId: "ja-fee" }],
+      ["get_borrowing_summary", {}],
+      ["get_interest_attribution", { from: "2024-01-01", to: "2024-01-02" }],
+      ["get_tax_year_summary", { year: 2024 }],
+      ["get_price", { securityId: "XEQT", currency: "CAD", asOf: "2024-01-05" }],
     ];
     const SHA256_HEX = /\b[0-9a-f]{64}\b/i;
     const BCRYPT = /\$2[aby]\$/;
@@ -1138,7 +1197,7 @@ describe("money typing at the protocol boundary", () => {
     }
     expect(violations, violations.join("\n")).toEqual([]);
     // Legible inventory of every number-typed input on the surface today.
-    expect(numbersFound).toEqual(["list_journals:limit"]);
+    expect(numbersFound).toEqual(["list_journals:limit", "get_tax_year_summary:year"]);
   });
 
   it.each([

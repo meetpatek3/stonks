@@ -193,6 +193,8 @@ export type FacilityInterestVariance = {
   periodEnd: string;
   modelledTotalMinor: string;
   actualPostedMinor: string;
+  /** Posted INTEREST_CHARGED journals included in actualPostedMinor. */
+  actualJournalIds: string[];
   /** modelled − actual, minor units. */
   varianceMinor: string;
   modelledByUse: Partial<Record<FacilityUse, string>>;
@@ -232,6 +234,8 @@ export type FacilityBorrowing = {
   effectiveRateBps: number | null;
   /** Posted interest charged in the calendar year of `asOf`, minor units. */
   interestChargedYtdMinor: string;
+  /** Posted interest journals included in interestChargedYtdMinor. */
+  actualInterestJournalIds: string[];
   /**
    * INVESTMENT-use share of YTD posted interest, from facility-use attribution.
    * `null` when a charge in the year has no use attribution (unknown share).

@@ -23,6 +23,27 @@ export function makeTestCtx(overrides?: {
         getSnapshot: async (id) =>
           emptyPortfolioSnapshot({ householdId: id, reportingCurrency: "CAD" }),
       },
+      interest: {
+        getAttribution: async (_householdId, periodStart, periodEnd) => ({
+          periodStart,
+          periodEnd,
+          reportingCurrency: "CAD",
+          reportingMinorUnits: 2,
+          investmentInterestMinor: "0",
+          actualInterestJournalIds: [],
+          allocations: [],
+          unallocatedMinor: "0",
+          uncertaintyReasons: [],
+        }),
+      },
+      prices: {
+        getSecurity: async () => null,
+        listOverrides: async () => [],
+        latestQuoteAsOf: async () => null,
+        insertOverride: async () => {
+          throw new Error("prices.insertOverride not stubbed in this test");
+        },
+      },
       accounts: {
         list: async () => [],
         getById: async () => null,
