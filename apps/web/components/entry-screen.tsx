@@ -211,6 +211,8 @@ function EntryForm({
   const router = useRouter();
   const [type, setType] = useState<JournalType>("DEPOSIT");
   const [mode, setMode] = useState<"entry" | "fund-transfer">("entry");
+  const [openingMode, setOpeningMode] = useState<"cash" | "position">("cash");
+  const [unknownCost, setUnknownCost] = useState(false);
   const [tradeDate, setTradeDate] = useState(defaultTradeDate);
   const [amount, setAmount] = useState("");
   const [quantity, setQuantity] = useState("");
@@ -246,6 +248,10 @@ function EntryForm({
     setError(null);
     setSuccessId(null);
     setQuantity("");
+    setUnknownCost(false);
+    if (type === "OPENING") {
+      setOpeningMode("cash");
+    }
 
     if (type === "TRANSFER") {
       setFromAccountId(initialAccountId);
@@ -253,7 +259,7 @@ function EntryForm({
         householdAccounts.find((account) => account.id !== initialAccountId)?.id ??
           "",
       );
-    } else if (type === "BUY" || type === "SELL") {
+    } else if (type === "BUY" || type === "SELL" || type === "OPENING") {
       setAccountId(preferBrokerageAccountId(householdAccounts, initialAccountId));
     } else {
       setAccountId(initialAccountId);
@@ -337,6 +343,102 @@ function EntryForm({
     setSuccessId(id);
     setMode("entry");
     setTransferAmount("");
+    router.refresh();
+  }
+
+  async function submitOpening(): Promise<void> {
+    if (!accountId) {
+      setError("Choose an account");
+      return;
+    }
+
+    if (openingMode === "cash") {
+      const minorString = decimalAmountToMinorString(amount, minorUnits);
+      if (minorString === null) {
+        setError("Amount must be a plain decimal number");
+        return;
+      }
+      const amountMinor = BigInt(minorString);
+      if (amountMinor <= 0n) {
+        setError("Amount must be greater than zero");
+        return;
+      }
+
+      const postings = buildEntryPostings({
+        type: "OPENING",
+        mode: "cash",
+        accountId,
+        externalAccountId,
+        amountMinor,
+      });
+      const body: Record<string, unknown> = {
+        type: "OPENING",
+        tradeDate,
+        postings,
+      };
+      if (memo.trim()) body.memo = memo.trim();
+
+      const id = await postJournal(body);
+      if (id === null) return;
+
+      setSuccessId(id);
+      setAmount("");
+      setMemo("");
+      router.refresh();
+      return;
+    }
+
+    const sid = securityId.trim();
+    if (!sid) {
+      setError("Choose or enter a security");
+      return;
+    }
+    const qty = quantity.trim();
+    if (!isPositiveQuantity(qty)) {
+      setError("Quantity must be a positive decimal number");
+      return;
+    }
+
+    let costMinor: bigint | null = null;
+    if (!unknownCost) {
+      const minorString = decimalAmountToMinorString(amount, minorUnits);
+      if (minorString === null) {
+        setError("Cost must be a plain decimal number, or mark cost as unknown");
+        return;
+      }
+      const parsed = BigInt(minorString);
+      if (parsed <= 0n) {
+        setError("Cost must be greater than zero, or mark cost as unknown");
+        return;
+      }
+      costMinor = parsed;
+    }
+
+    const postings = buildEntryPostings({
+      type: "OPENING",
+      mode: "position",
+      accountId,
+      externalAccountId,
+      quantity: qty,
+      securityId: sid,
+      costMinor,
+    });
+    const body: Record<string, unknown> = {
+      type: "OPENING",
+      tradeDate,
+      postings,
+    };
+    if (memo.trim()) body.memo = memo.trim();
+
+    const id = await postJournal(body);
+    if (id === null) return;
+
+    setSuccessId(id);
+    setAmount("");
+    setQuantity("");
+    setMemo("");
+    setSecurityId("");
+    setUnknownCost(false);
     router.refresh();
   }
 
@@ -471,7 +573,7 @@ function EntryForm({
         return;
       }
       if (isOpening) {
-        setError("OPENING flow is coming in the next task.");
+        await submitOpening();
         return;
       }
       if (type === "CORPORATE_ACTION") {
@@ -743,11 +845,7 @@ function EntryForm({
         </Select.Popover>
       </Select>
 
-      {isOpening ? (
-        <p className="text-sm text-muted">
-          OPENING flow is coming in the next task.
-        </p>
-      ) : type === "TRANSFER" && householdAccounts.length < 2 ? (
+      {type === "TRANSFER" && householdAccounts.length < 2 ? (
         <EmptyState>
           <EmptyState.Header>
             <EmptyState.Media variant="icon">
@@ -772,7 +870,116 @@ function EntryForm({
             <Input type="date" />
           </TextField>
 
-          {isBuyOrSell ? (
+          {isOpening ? (
+            <>
+              <Select
+                className="w-full"
+                selectedKey={openingMode}
+                onSelectionChange={(key) => {
+                  if (key == null) return;
+                  setOpeningMode(String(key) as "cash" | "position");
+                  setAmount("");
+                  setQuantity("");
+                  setSecurityId("");
+                  setUnknownCost(false);
+                  setError(null);
+                }}
+                aria-label="Opening mode"
+              >
+                <Label>Opening mode</Label>
+                <Select.Trigger>
+                  <Select.Value />
+                  <Select.Indicator />
+                </Select.Trigger>
+                <Select.Popover>
+                  <ListBox>
+                    <ListBox.Item id="cash" textValue="Cash">
+                      Cash
+                      <ListBox.ItemIndicator />
+                    </ListBox.Item>
+                    <ListBox.Item id="position" textValue="Position">
+                      Position
+                      <ListBox.ItemIndicator />
+                    </ListBox.Item>
+                  </ListBox>
+                </Select.Popover>
+              </Select>
+
+              <AccountSelect
+                label="Account"
+                accounts={householdAccounts}
+                selectedKey={accountId}
+                onSelect={setAccountId}
+              />
+
+              {openingMode === "cash" ? (
+                <TextField
+                  name="amount"
+                  isRequired
+                  className="w-full"
+                  value={amount}
+                  onChange={setAmount}
+                >
+                  <Label>Amount ({reportingCurrency})</Label>
+                  <Input
+                    inputMode="decimal"
+                    placeholder="1000.00"
+                    autoComplete="off"
+                  />
+                </TextField>
+              ) : (
+                <>
+                  <TradeSecurityField
+                    key="opening-security"
+                    securityIds={securityIds}
+                    value={securityId}
+                    onChange={setSecurityId}
+                  />
+                  <TextField
+                    name="quantity"
+                    isRequired
+                    className="w-full"
+                    value={quantity}
+                    onChange={setQuantity}
+                  >
+                    <Label>Quantity</Label>
+                    <Input
+                      inputMode="decimal"
+                      placeholder="10"
+                      autoComplete="off"
+                    />
+                  </TextField>
+                  <label className="flex items-center gap-2 text-sm text-foreground">
+                    <input
+                      type="checkbox"
+                      checked={unknownCost}
+                      onChange={(event) => {
+                        setUnknownCost(event.target.checked);
+                        if (event.target.checked) setAmount("");
+                      }}
+                    />
+                    I don&apos;t know the cost
+                  </label>
+                  {!unknownCost ? (
+                    <TextField
+                      name="amount"
+                      isRequired
+                      className="w-full"
+                      value={amount}
+                      onChange={setAmount}
+                    >
+                      <Label>Cost ({reportingCurrency})</Label>
+                      <Input
+                        inputMode="decimal"
+                        placeholder="1000.00"
+                        autoComplete="off"
+                      />
+                    </TextField>
+                  ) : null}
+                </>
+              )}
+            </>
+          ) : isBuyOrSell ? (
             <>
               <AccountSelect
                 label="Brokerage"
@@ -940,9 +1147,7 @@ function EntryForm({
         type="submit"
         variant="primary"
         isPending={pending}
-        isDisabled={
-          isOpening || (type === "TRANSFER" && householdAccounts.length < 2)
-        }
+        isDisabled={type === "TRANSFER" && householdAccounts.length < 2}
         fullWidth
       >
         Post journal
