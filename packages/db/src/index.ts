@@ -37,4 +37,4 @@ export {
   type VerifiedToken,
   type ApiTokenSummary,
 } from "./repos/token-repo";
-export { eq, and, or, isNull, sql } from "drizzle-orm";
+export { eq, and, or, isNull, isNotNull, sql } from "drizzle-orm";
