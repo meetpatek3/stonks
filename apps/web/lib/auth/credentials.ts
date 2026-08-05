@@ -1,4 +1,13 @@
-import { currency, eq, household, isNull, or, type Db } from "@stonks/db";
+import {
+  and,
+  currency,
+  eq,
+  household,
+  isNotNull,
+  isNull,
+  or,
+  type Db,
+} from "@stonks/db";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
 import { loadEnv } from "@/lib/env";
 
@@ -31,7 +40,12 @@ function bootstrapCredentials(): { username: string; password: string } {
 /**
  * Ensures a household can log in:
  * - empty DB → create first household from AUTH_* env
- * - existing household with null auth columns (post-0003 upgrade) → attach AUTH_* once
+ * - existing household(s) with null auth columns and none yet provisioned
+   (post-0003 upgrade) → attach AUTH_* once to the first unprovisioned row
+ *
+ * If any household is already provisioned, leave others alone. Re-attaching
+ * AUTH_* onto a second row races the unique username constraint and takes
+ * down every login attempt.
  */
 export async function ensureBootstrapUser(db: Db): Promise<void> {
   loadEnv();
@@ -48,6 +62,15 @@ export async function ensureBootstrapUser(db: Db): Promise<void> {
     });
     return;
   }
+
+  const alreadyProvisioned = await db
+    .select({ id: household.id })
+    .from(household)
+    .where(and(isNotNull(household.authUsername), isNotNull(household.authPasswordHash)))
+    .limit(1)
+    .then((rows) => rows[0]);
+
+  if (alreadyProvisioned) return;
 
   const unprovisioned = await db
     .select({ id: household.id })
