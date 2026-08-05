@@ -182,4 +182,119 @@ describeIfDb("facility terms repo integration", () => {
     // Unknown benchmark id is omitted — not an empty invented curve under that id.
     expect(curves.size).toBe(1);
   });
+
+  it("creates a benchmark and upserts rate points onto its curve", async () => {
+    const created = await repo.createBenchmark({ name: `WritePrime-${suffix}` });
+    await repo.upsertBenchmarkPoint(created.id, {
+      effectiveDate: "2025-01-01",
+      rateBps: 475,
+    });
+    await repo.upsertBenchmarkPoint(created.id, {
+      effectiveDate: "2025-01-01",
+      rateBps: 480,
+    });
+    await repo.upsertBenchmarkPoint(created.id, {
+      effectiveDate: "2025-03-01",
+      rateBps: 490,
+    });
+
+    const curves = await repo.listBenchmarkCurves([created.id]);
+    expect(curves.get(created.id)).toEqual({
+      name: `WritePrime-${suffix}`,
+      points: [
+        { effectiveDate: "2025-01-01", rateBps: 480 },
+        { effectiveDate: "2025-03-01", rateBps: 490 },
+      ],
+    });
+
+    const listed = await repo.listBenchmarks();
+    expect(listed.some((b) => b.id === created.id && b.name === created.name)).toBe(
+      true,
+    );
+
+    await db.delete(benchmarkRatePoint).where(eq(benchmarkRatePoint.benchmarkId, created.id));
+    await db.delete(benchmarkRate).where(eq(benchmarkRate.id, created.id));
+  });
+
+  it("inserts terms, closes prior open rows, and rejects cash / foreign accounts", async () => {
+    const writeFacilityId = `facility-write-${suffix}`;
+    await db.insert(account).values({
+      id: writeFacilityId,
+      householdId,
+      type: "CREDIT_FACILITY",
+      currency: "CAD",
+      name: "Write LOC",
+    });
+
+    const first = await repo.insertTerms(householdId, {
+      accountId: writeFacilityId,
+      benchmarkId,
+      spreadBps: 25,
+      dayCount: "ACT_365",
+      postingDayRule: "MONTH_END",
+      capitalizeInterest: true,
+      effectiveFrom: "2025-01-01",
+    });
+    expect(first.terms.spreadBps).toBe(25);
+    expect(first.effectiveTo).toBeNull();
+
+    const mid = await repo.listEffectiveTerms(householdId, "2025-02-01");
+    expect(
+      mid.find((r) => r.terms.facilityAccountId === writeFacilityId)?.terms.spreadBps,
+    ).toBe(25);
+
+    const second = await repo.insertTerms(householdId, {
+      accountId: writeFacilityId,
+      benchmarkId,
+      spreadBps: 40,
+      dayCount: "ACT_365",
+      postingDayRule: "CALENDAR_DAY",
+      capitalizeInterest: false,
+      effectiveFrom: "2025-06-01",
+    });
+    expect(second.terms.spreadBps).toBe(40);
+
+    const stillFirst = await repo.listEffectiveTerms(householdId, "2025-03-01");
+    expect(
+      stillFirst.find((r) => r.terms.facilityAccountId === writeFacilityId)?.terms
+        .spreadBps,
+    ).toBe(25);
+    expect(
+      stillFirst.find((r) => r.terms.facilityAccountId === writeFacilityId)?.effectiveTo,
+    ).toBe("2025-05-31");
+
+    const later = await repo.listEffectiveTerms(householdId, "2025-07-01");
+    expect(
+      later.find((r) => r.terms.facilityAccountId === writeFacilityId)?.terms.spreadBps,
+    ).toBe(40);
+
+    await expect(
+      repo.insertTerms(householdId, {
+        accountId: cashId,
+        benchmarkId,
+        spreadBps: 1,
+        dayCount: "ACT_365",
+        postingDayRule: "MONTH_END",
+        capitalizeInterest: true,
+        effectiveFrom: "2025-08-01",
+      }),
+    ).rejects.toMatchObject({ name: "ValidationError", code: "ACCOUNT" });
+
+    await expect(
+      repo.insertTerms(householdId, {
+        accountId: otherFacilityId,
+        benchmarkId,
+        spreadBps: 1,
+        dayCount: "ACT_365",
+        postingDayRule: "MONTH_END",
+        capitalizeInterest: true,
+        effectiveFrom: "2025-08-01",
+      }),
+    ).rejects.toMatchObject({ name: "ValidationError", code: "ACCOUNT" });
+
+    await db
+      .delete(creditFacilityTerms)
+      .where(eq(creditFacilityTerms.accountId, writeFacilityId));
+    await db.delete(account).where(eq(account.id, writeFacilityId));
+  });
 });

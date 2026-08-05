@@ -25,9 +25,13 @@ export {
 } from "./repos/price-repo";
 export {
   createFacilityTermsRepo,
+  isoDateMinusOneDay,
   type FacilityTermsRepo,
   type FacilityTermsRecord,
   type BenchmarkCurve,
+  type CreateBenchmarkInput,
+  type UpsertBenchmarkPointInput,
+  type CreateFacilityTermsInput,
 } from "./repos/facility-terms-repo";
 export {
   createTokenRepo,

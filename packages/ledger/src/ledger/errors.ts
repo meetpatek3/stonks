@@ -10,7 +10,10 @@ export class ValidationError extends Error {
       | "UNKNOWN_JOURNAL"
       | "NOT_POSTED"
       | "MISSING_COST"
-      | "COST_CURRENCY",
+      | "COST_CURRENCY"
+      | "ACCOUNT"
+      | "TERMS"
+      | "BENCHMARK",
     readonly journalIds: string[] = [],
   ) {
     super(message);
