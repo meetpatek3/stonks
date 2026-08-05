@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { NAV_ITEMS, isRouteActive } from "@/lib/nav";
 
 describe("NAV_ITEMS", () => {
-  it("lists the nine screens in order", () => {
+  it("lists the ten screens in order", () => {
     expect(NAV_ITEMS.map((item) => [item.label, item.href])).toEqual([
       ["Overview", "/"],
       ["Accounts", "/accounts"],
@@ -13,6 +13,7 @@ describe("NAV_ITEMS", () => {
       ["Tax", "/tax"],
       ["Open Items", "/open-items"],
       ["New Entry", "/entry"],
+      ["Settings", "/settings"],
     ]);
   });
 
@@ -71,7 +72,7 @@ describe("isRouteActive", () => {
   });
 
   it("highlights exactly one entry for any given path", () => {
-    for (const path of ["/", "/accounts", "/positions/abc", "/ledger", "/entry"]) {
+    for (const path of ["/", "/accounts", "/positions/abc", "/ledger", "/entry", "/settings"]) {
       const active = NAV_ITEMS.filter((item) => isRouteActive(path, item.href));
       expect(active).toHaveLength(1);
     }

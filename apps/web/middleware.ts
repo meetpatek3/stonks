@@ -1,7 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE, readSessionToken } from "@/lib/auth/session";
 
-const PUBLIC_PATHS = ["/login", "/api/auth/login", "/api/health"];
+// /api/mcp is public to the cookie layer only — the MCP route does its own
+// bearer-token auth and 401s before any MCP processing (design spec §2).
+const PUBLIC_PATHS = ["/login", "/api/auth/login", "/api/health", "/api/mcp"];
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;

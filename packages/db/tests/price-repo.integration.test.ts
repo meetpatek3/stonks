@@ -92,6 +92,15 @@ describeIfDb("price repo integration", () => {
     expect(new Set(rows.map((r) => r.securityId)).size).toBe(1);
   });
 
+  it("reads a security's own price currency and rejects an unknown id", async () => {
+    await expect(repo.getSecurity(securityId)).resolves.toEqual({
+      id: securityId,
+      currency: "CAD",
+      minorUnits: 2,
+    });
+    await expect(repo.getSecurity("missing-security")).resolves.toBeNull();
+  });
+
   it("upserts quotes and reads the most recent quote at or before a date", async () => {
     await repo.upsertQuotes([
       {

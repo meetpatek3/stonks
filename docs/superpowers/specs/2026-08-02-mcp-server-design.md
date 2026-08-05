@@ -15,7 +15,7 @@ stuff for the user … the MCP allows agents to do anything in the app that a us
 
 - A Model Context Protocol server exposing the full user-facing capability surface of the
   portfolio tracker: reads (portfolio, accounts, positions, journals, borrowing, tax,
-  open items, prices), writes (recording every journal type, corrections via supersession,
+  open items, prices), writes (recording supported journal types, corrections via supersession,
   account management, facility terms, price overrides), and the import/reconciliation workflow.
 - Every tool call scoped to exactly one household, authenticated with a revocable token.
 - Ledger-faithful: tools delegate to `@stonks/ledger` and `@stonks/db`; no reimplemented maths.
@@ -58,7 +58,7 @@ Rationale:
   (resource-updated pushes). Acceptable for v1 — agents poll.
 - STDIO is not offered: the server needs the household database and must enforce auth; a
   local STDIO binary would bypass the app's boundary. (A user self-hosting on localhost simply
-  points their agent at `http://localhost:3000/api/mcp`.)
+  points their agent at `http://localhost:3000/api/mcp/mcp`.)
 
 `apps/web/middleware.ts` must exempt `/api/mcp` from the cookie-auth redirect; the MCP layer
 performs its own bearer-token auth (below).
@@ -196,9 +196,10 @@ Common output envelope: `structuredContent` with typed payload + short text summ
 
 ### Writes (scope: `read_write`)
 
-13. **`record_journal`** — the workhorse; covers every journal type (`BUY`, `SELL`, `DIVIDEND`,
-    `INTEREST_CHARGED`, `INTEREST_EARNED`, `FEE`, `TRANSFER`, `DEPOSIT`, `WITHDRAWAL`,
-    `CORPORATE_ACTION`, `OPENING`). In: type, tradeDate, memo?, externalNaturalKey?,
+13. **`record_journal`** — the workhorse; covers every supported ordinary-posting journal type
+    (`BUY`, `SELL`, `DIVIDEND`, `INTEREST_CHARGED`, `INTEREST_EARNED`, `FEE`, `TRANSFER`,
+    `DEPOSIT`, `WITHDRAWAL`, `OPENING`). `CORPORATE_ACTION` history is readable, but its
+    action payload is not yet supported. In: type, tradeDate, memo?, externalNaturalKey?,
     postings `[{ accountId, amountMinor: string, currency, quantity?: string, securityId?, tradeCurrency?, fxRateN?/fxRateD?: string }]` (≥2),
     facilityUses when a facility is drawn. Validates `assertJournalBalanced` +
     `assertFacilityUseComplete` before persisting via `insertPosted`; `sort_key` assigned

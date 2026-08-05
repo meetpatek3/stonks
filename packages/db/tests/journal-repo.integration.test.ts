@@ -143,7 +143,7 @@ describeIfDb("journal repo integration", () => {
     );
     expect(posted.every((j) => j.status === "POSTED")).toBe(true);
 
-    const all = await repo.listAll(householdId);
+    const all = await repo.listAll(householdId, { includeSuperseded: true });
     expect(all.map((j) => j.id).sort()).toEqual(
       [journalId, supersededId, correctionId].sort(),
     );

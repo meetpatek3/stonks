@@ -25,10 +25,12 @@ import {
   type JournalRow,
 } from "@/lib/ledger-table";
 import {
+  deriveInterestAttribution,
   derivePortfolioSnapshot,
   heldSecurityIds,
   type AccountMeta,
   type FacilityTermsInput,
+  type InterestAttributionReadModel,
 } from "@/lib/portfolio-derive";
 import { emptyPortfolioSnapshot, type PortfolioSnapshot } from "@/lib/portfolio-shared";
 
@@ -52,6 +54,7 @@ export type {
   ValuationSummary,
   ValuePoint,
 } from "@/lib/portfolio-shared";
+export type { InterestAttributionReadModel } from "@/lib/portfolio-derive";
 export { formatMoney } from "@/lib/portfolio-shared";
 
 /**
@@ -66,6 +69,7 @@ async function loadPortfolioSnapshot(
   db: Db,
   householdId: string,
   taxYear?: number,
+  requestedAsOf?: string,
 ): Promise<PortfolioSnapshot> {
   const householdRow = await db
     .select()
@@ -116,7 +120,7 @@ async function loadPortfolioSnapshot(
   const journals = await repo.listPosted(householdId);
 
   // UTC asOf — same date basis as price resolution and the ledger tables.
-  const asOf = new Date().toISOString().slice(0, 10);
+  const asOf = requestedAsOf ?? new Date().toISOString().slice(0, 10);
 
   return derivePortfolioSnapshot({
     householdId,
@@ -124,7 +128,7 @@ async function loadPortfolioSnapshot(
     ...(reportingMinorUnits === undefined ? {} : { reportingMinorUnits }),
     accounts,
     journals,
-    prices: await resolveHeldPrices(db, householdId, journals),
+    prices: await resolveHeldPrices(db, householdId, journals, asOf),
     facilityTerms: await loadFacilityTerms(db, householdId, asOf),
     asOf,
     ...(taxYear === undefined ? {} : { taxYear }),
@@ -179,6 +183,7 @@ async function resolveHeldPrices(
   db: Db,
   householdId: string,
   journals: readonly Journal[],
+  asOf: string,
 ): Promise<ResolvedPrice[]> {
   const securityIds = heldSecurityIds(journals);
   if (securityIds.length === 0) return [];
@@ -187,8 +192,6 @@ async function resolveHeldPrices(
   // household west of Greenwich asking late in the evening asks for a date
   // whose close does not exist yet, and gets the previous close back marked
   // stale — visibly a day behind, never silently relabelled as today's.
-  const asOf = new Date().toISOString().slice(0, 10);
-
   try {
     const securities = await loadSecurityRefs(db, securityIds, asOf);
     if (securities.length === 0) return [];
@@ -216,6 +219,69 @@ async function resolveHeldPrices(
  * call, so this is safe to import anywhere.
  */
 export const getPortfolioSnapshot = cache(loadPortfolioSnapshot);
+
+/**
+ * Date-ranged investment-interest attribution for MCP. Persistence stays here;
+ * the actual interest and dollar-day allocation are derived in the pure read
+ * model so the tool never needs to know how journals are replayed.
+ */
+export async function getInterestAttribution(
+  db: Db,
+  householdId: string,
+  periodStart: string,
+  periodEnd: string,
+): Promise<InterestAttributionReadModel> {
+  const householdRow = await db
+    .select()
+    .from(household)
+    .where(eq(household.id, householdId))
+    .limit(1)
+    .then((rows) => rows[0]);
+
+  if (!householdRow) {
+    return {
+      periodStart,
+      periodEnd,
+      reportingCurrency: "",
+      reportingMinorUnits: null,
+      investmentInterestMinor: null,
+      actualInterestJournalIds: [],
+      allocations: [],
+      unallocatedMinor: null,
+      uncertaintyReasons: [`Household ${householdId} was not found.`],
+    };
+  }
+
+  const reportingMinorUnits = await db
+    .select({ minorUnits: currency.minorUnits })
+    .from(currency)
+    .where(eq(currency.code, householdRow.reportingCurrency))
+    .limit(1)
+    .then((rows) => rows[0]?.minorUnits);
+
+  const accountRows = await db
+    .select({
+      id: account.id,
+      type: account.type,
+      currency: account.currency,
+      name: account.name,
+      minorUnits: currency.minorUnits,
+    })
+    .from(account)
+    .innerJoin(currency, eq(account.currency, currency.code))
+    .where(eq(account.householdId, householdId));
+
+  const journals = await createJournalRepo(db).listPosted(householdId);
+
+  return deriveInterestAttribution({
+    reportingCurrency: householdRow.reportingCurrency,
+    ...(reportingMinorUnits === undefined ? {} : { reportingMinorUnits }),
+    accounts: accountRows,
+    journals,
+    periodStart,
+    periodEnd,
+  });
+}
 
 /**
  * The snapshot for the current request, or an empty one naming why there is
@@ -311,7 +377,9 @@ export async function loadSessionJournalRows(): Promise<{
     return { rows: [], accounts, message: "no accounts" };
   }
 
-  const journals = await createJournalRepo(db).listAll(householdId);
+  const journals = await createJournalRepo(db).listAll(householdId, {
+    includeSuperseded: true,
+  });
   return { rows: toJournalRows(journals, accounts), accounts };
 }
 

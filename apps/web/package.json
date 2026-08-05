@@ -14,6 +14,7 @@
     "@heroui/react": "^3.2.3",
     "@heroui/styles": "^3.2.3",
     "@iconify/react": "^6.0.2",
+    "@modelcontextprotocol/sdk": "^1.26.0",
     "@number-flow/react": "^0.6.2",
     "@stonks/db": "workspace:*",
     "@stonks/ledger": "workspace:*",
@@ -34,6 +35,7 @@
     "jose": "^6.2.6",
     "maplibre-gl": "^6.1.0",
     "marked": "^18.0.7",
+    "mcp-handler": "^1.1.0",
     "motion": "^12.43.0",
     "next": "^15.2.0",
     "react": "^19.0.0",
@@ -48,7 +50,8 @@
     "streamdown": "^2.5.0",
     "tailwind-merge": "^3.6.0",
     "tailwind-variants": "^3.3.0",
-    "tailwindcss": "^4.3.3"
+    "tailwindcss": "^4.3.3",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.3",
