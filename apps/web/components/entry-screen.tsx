@@ -169,6 +169,7 @@ function EntryForm({
   const [successId, setSuccessId] = useState<string | null>(null);
 
   const fromAccount = householdAccounts.find((a) => a.id === fromAccountId);
+  const chargedAccount = householdAccounts.find((a) => a.id === accountId);
   const needsFacilityUse = fromAccount?.type === "CREDIT_FACILITY";
   const isTradeOrOpening = type === "BUY" || type === "SELL" || type === "OPENING";
   const showSecurityField =
@@ -182,6 +183,9 @@ function EntryForm({
       );
     } else {
       setAccountId(initialAccountId);
+    }
+    if (type !== "DIVIDEND" && type !== "FEE") {
+      setSecurityId("");
     }
   }, [type, householdAccounts, initialAccountId]);
 
@@ -214,6 +218,11 @@ function EntryForm({
 
       let postings;
       let payingAccountId: string | null = null;
+      let skipCashGate = false;
+      const securityIdForPostings =
+        (type === "DIVIDEND" || type === "FEE") && securityId
+          ? { securityId }
+          : {};
       if (type === "TRANSFER") {
         if (householdAccounts.length < 2) {
           setError("Create at least two household accounts before transferring.");
@@ -234,6 +243,8 @@ function EntryForm({
           amountMinor,
         });
         payingAccountId = fromAccountId;
+        // Facility draws increase liability (balance ≤ 0); cash sufficiency does not apply.
+        skipCashGate = fromAccount?.type === "CREDIT_FACILITY";
       } else {
         if (!accountId) {
           setError("Choose an account");
@@ -249,7 +260,7 @@ function EntryForm({
             accountId,
             externalAccountId,
             amountMinor,
-            ...(securityId ? { securityId } : {}),
+            ...securityIdForPostings,
           });
         } else {
           postings = buildEntryPostings({
@@ -257,14 +268,19 @@ function EntryForm({
             accountId,
             externalAccountId,
             amountMinor,
-            ...(securityId ? { securityId } : {}),
+            ...securityIdForPostings,
           });
           payingAccountId = accountId;
+          // Capitalized interest on a facility is not a cash outflow.
+          skipCashGate =
+            type === "INTEREST_CHARGED" &&
+            chargedAccount?.type === "CREDIT_FACILITY";
         }
       }
 
       if (
         payingAccountId &&
+        !skipCashGate &&
         cashShortfallMinor(
           cashAvailableMinor(cashByAccountId[payingAccountId]),
           amountMinor,
